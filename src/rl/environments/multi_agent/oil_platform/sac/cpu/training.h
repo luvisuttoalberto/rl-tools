@@ -33,43 +33,74 @@ using ENVIRONMENT  = rlt::rl::environments::multi_agent::OilPlatform<PLATFORM_SP
 struct LOOP_CORE_PARAMETERS
         : rlt::rl::algorithms::sac::loop::core::DefaultParameters<T,TI,ENVIRONMENT>
 {
+    // Episode & buffer length
+    static constexpr TI STEP_LIMIT        = 1000000;
+    static constexpr TI REPLAY_BUFFER_CAP = 1000000;
+
+    // Exploration warm-up
+    static constexpr TI N_WARMUP_STEPS        = 10000;
+    static constexpr TI N_WARMUP_STEPS_CRITIC = 10000;
+    static constexpr TI N_WARMUP_STEPS_ACTOR  = 20000;
+
+    // Discount factor
+    static constexpr T GAMMA = 0.995;
+
+    // Network size
+    static constexpr TI ACTOR_NUM_LAYERS  = 2;
+    static constexpr TI ACTOR_HIDDEN_DIM  = 128;
+    static constexpr TI CRITIC_NUM_LAYERS = 2;
+    static constexpr TI CRITIC_HIDDEN_DIM = 128;
+
     struct SAC_PARAMETERS
             : rlt::rl::algorithms::sac::DefaultParameters<T,TI,ENVIRONMENT::ACTION_DIM>
     {
+        // Batch sizes
         static constexpr TI ACTOR_BATCH_SIZE  = 256;
         static constexpr TI CRITIC_BATCH_SIZE = 256;
+
+        // Update frequencies
+        static constexpr TI ACTOR_TRAINING_INTERVAL       = 2;
+        static constexpr TI CRITIC_TARGET_UPDATE_INTERVAL = 8;
+
+        // Discount & soft updates (τ = 0.0005)
+        static constexpr T GAMMA                        = 0.995;
+        static constexpr T ACTOR_POLYAK                 = 1.0 - 0.0005;
+        static constexpr T CRITIC_POLYAK                = 1.0 - 0.0005;
+
+        // Entropy tuning
+        static constexpr T TARGET_ENTROPY       = -0.5 * ((T)ENVIRONMENT::ACTION_DIM);
+        static constexpr T ALPHA                = 0.01;
+        static constexpr bool ADAPTIVE_ALPHA    = true;
     };
 
-    // Warmup steps (increased for larger replay buffer)
-    static constexpr TI N_WARMUP_STEPS = 10000;        // Increased from 100 for better initial exploration
-    static constexpr TI N_WARMUP_STEPS_CRITIC = 5000;  // Start critic training earlier
-    static constexpr TI N_WARMUP_STEPS_ACTOR = 10000;  // Wait for critic to stabilize
-
-    // Core parameters
-    static constexpr TI STEP_LIMIT        = ENVIRONMENT::EPISODE_STEP_LIMIT;
-    static constexpr TI REPLAY_BUFFER_CAP = 1000000;
-    static constexpr TI ACTOR_NUM_LAYERS  = 4;
-    static constexpr TI ACTOR_HIDDEN_DIM  = 256;
-    static constexpr TI CRITIC_NUM_LAYERS = 4;
-    static constexpr TI CRITIC_HIDDEN_DIM = 256;
-    static constexpr T   ALPHA            = 0.2;
-
-    // Custom optimizer parameters for the multi-agent task
-    struct ACTOR_OPTIMIZER_PARAMETERS : rlt::nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<T> {
-        static constexpr T ALPHA = 0.0001;  // Reduced from 0.001 for stability
-        static constexpr T EPSILON = 1e-5;  // Increased from 1e-7 for better numerical stability
+    struct ACTOR_OPTIMIZER_PARAMETERS
+            : rlt::nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<T>
+    {
+        static constexpr T ALPHA                   = 3e-5;
+        static constexpr T EPSILON                 = 1e-6;
+        static constexpr bool ENABLE_GRADIENT_CLIPPING = true;
+        static constexpr T GRADIENT_CLIP_VALUE     = 0.5;
+        static constexpr bool ENABLE_WEIGHT_DECAY   = true;
+        static constexpr T WEIGHT_DECAY             = 1e-4;
     };
 
-    struct CRITIC_OPTIMIZER_PARAMETERS : rlt::nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<T> {
-        static constexpr T ALPHA = 0.0001;  // Reduced from 0.001 for stability
-        static constexpr T EPSILON = 1e-5;  // Increased from 1e-7 for better numerical stability
+    struct CRITIC_OPTIMIZER_PARAMETERS
+            : rlt::nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<T>
+    {
+        static constexpr T ALPHA                   = 3e-5;
+        static constexpr T EPSILON                 = 1e-6;
+        static constexpr bool ENABLE_GRADIENT_CLIPPING = true;
+        static constexpr T GRADIENT_CLIP_VALUE     = 0.5;
+        static constexpr bool ENABLE_WEIGHT_DECAY   = true;
+        static constexpr T WEIGHT_DECAY             = 1e-4;
     };
 
-    struct ALPHA_OPTIMIZER_PARAMETERS : rlt::nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<T> {
-        static constexpr T ALPHA = 0.0001;  // Reduced from 0.001 for stability
+    struct ALPHA_OPTIMIZER_PARAMETERS
+            : rlt::nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<T>
+    {
+        static constexpr T ALPHA = 1e-4;
     };
 };
-
 // 4) Build the loop config — two modes: BENCHMARK or with evaluation
 #ifdef BENCHMARK
 

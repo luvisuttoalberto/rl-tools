@@ -87,10 +87,9 @@ namespace rl_tools {
         state.disaster.position[0] = T(0);
         state.disaster.position[1] = T(0);
 
-        for (TI idx = 0; idx < parameters.GRID_SIZE_X * parameters.GRID_SIZE_Y; idx++) {
-            state.occupancy[idx] = false;
+        for (TI idx = 0; idx < parameters.GRID_SIZE_X * parameters.GRID_SIZE_Y; ++idx) {
+            state.last_visit[idx] = TI(0);
         }
-
         state.step_count = 0;
     }
 
@@ -122,10 +121,9 @@ namespace rl_tools {
         state.disaster.position[0] = T(0);
         state.disaster.position[1] = T(0);
 
-        for (TI idx = 0; idx < parameters.GRID_SIZE_X * parameters.GRID_SIZE_Y; idx++) {
-            state.occupancy[idx] = false;
+        for (TI idx = 0; idx < parameters.GRID_SIZE_X * parameters.GRID_SIZE_Y; ++idx) {
+            state.last_visit[idx] = TI(0);
         }
-
         state.step_count = 0;
     }
 
@@ -156,9 +154,9 @@ namespace rl_tools {
 
         T total_reward = T(0);
 
-        // (1) Copy occupancy
-        for (TI i = 0; i < parameters.GRID_SIZE_X * parameters.GRID_SIZE_Y; i++) {
-            next_state.occupancy[i] = state.occupancy[i];
+        // (1) Copy last-visited timestamps
+        for (TI idx = 0; idx < parameters.GRID_SIZE_X * parameters.GRID_SIZE_Y; ++idx) {
+            next_state.last_visit[idx] = state.last_visit[idx];
         }
 
         // (2) Disaster: 2% to start in any HIGH‑PRIORITY area, then drift at fixed vx,vy
@@ -274,12 +272,12 @@ namespace rl_tools {
             }
         }
 
-        // (6) Exploration bonus & proximity / high‑priority rewards
-        for (TI i = 0; i < parameters.N_AGENTS; i++) {
+        // (6) Two-phase reward logic
+        for (TI i = 0; i < parameters.N_AGENTS; ++i) {
             const auto &d = next_state.drone_states[i];
             if (d.mode == DroneMode::RECHARGING) continue;
 
-            // exploration
+            // map continuous pos to grid cell
             TI cx = math::clamp(device.math,
                                 TI(d.position[0] / parameters.GRID_CELL_SIZE),
                                 TI(0), parameters.GRID_SIZE_X - 1);
@@ -287,25 +285,35 @@ namespace rl_tools {
                                 TI(d.position[1] / parameters.GRID_CELL_SIZE),
                                 TI(0), parameters.GRID_SIZE_Y - 1);
             TI idx = cx + cy * parameters.GRID_SIZE_X;
-            if (!state.occupancy[idx]) {
-                next_state.occupancy[idx] = true;
-                total_reward += parameters.EXPLORATION_BONUS;
-            }
 
-            // proximity to disaster or high‑priority area
-            if (d.mode == DroneMode::EMERGENCY || d.disaster_detected) {
+            if (state.disaster.active) {
+                // Phase 1: all drones swarm to the spill
                 T dx = d.position[0] - next_state.disaster.position[0];
                 T dy = d.position[1] - next_state.disaster.position[1];
-                total_reward += (parameters.SENSOR_RANGE - math::sqrt(device.math, dx*dx + dy*dy));
+                T dist = math::sqrt(device.math, dx * dx + dy * dy);
+                total_reward += std::max(
+                        parameters.DISASTER_PRIORITY * (parameters.SENSOR_RANGE - dist),
+                        T(0)
+                );
             } else {
+                // Phase 2: continuous exploration
+                if (state.step_count - state.last_visit[idx] > parameters.REVISIT_THRESHOLD) {
+                    total_reward += parameters.EXPLORATION_BONUS;
+                    next_state.last_visit[idx] = next_state.step_count;
+                }
+
+                // priority vs general cells
                 T x = d.position[0], y = d.position[1];
-                T adx = std::abs(x - parameters.GRID_SIZE_X/2);
-                T ady = std::abs(y - parameters.GRID_SIZE_Y/2);
+                T adx = std::abs(x - parameters.GRID_SIZE_X / 2);
+                T ady = std::abs(y - parameters.GRID_SIZE_Y / 2);
                 bool inPlat = (adx <= parameters.PLATFORM_HALF_SIZE && ady <= parameters.PLATFORM_HALF_SIZE);
-                bool hH     = (ady <= parameters.PIPE_WIDTH/2 && adx >= parameters.PLATFORM_HALF_SIZE);
-                bool hV     = (adx <= parameters.PIPE_WIDTH/2 && ady >= parameters.PLATFORM_HALF_SIZE);
-                if (inPlat || hH || hV) {
+                bool inPipeH = (ady <= parameters.PIPE_WIDTH / 2 && adx >= parameters.PLATFORM_HALF_SIZE);
+                bool inPipeV = (adx <= parameters.PIPE_WIDTH / 2 && ady >= parameters.PLATFORM_HALF_SIZE);
+
+                if (inPlat || inPipeH || inPipeV) {
                     total_reward += parameters.HIGH_PRIORITY_BONUS;
+                } else {
+                    total_reward += parameters.GENERAL_AREA_BONUS;
                 }
             }
         }
@@ -368,6 +376,17 @@ namespace rl_tools {
             const typename rl::environments::multi_agent::OilPlatform<SPEC>::State &state,
             RNG & /*rng*/
     ) {
+        // bring in the T and TI types from SPEC:
+        using T  = typename SPEC::T;
+        using TI = typename SPEC::TI;
+
+        // 1) end immediately if a drone runs out of battery
+        for (TI i = 0; i < parameters.N_AGENTS; ++i) {
+            if (state.drone_states[i].battery <= T(0)) {
+                return true;
+            }
+        }
+        // 2) otherwise standard step‐limit check
         return state.step_count >= parameters.EPISODE_STEP_LIMIT;
     }
 }

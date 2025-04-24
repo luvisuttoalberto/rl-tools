@@ -43,9 +43,17 @@ namespace rl_tools {
               // Pipes extending from platform, width
               static constexpr T PIPE_WIDTH          = 1.0;
 
-              // Exploration bonus (first‐visit)
               static constexpr T EXPLORATION_BONUS   = 0.05;
               static constexpr T HIGH_PRIORITY_BONUS = 1.0f;
+
+              // how many steps before a cell “ages out”
+              static constexpr TI REVISIT_THRESHOLD  = 500;
+
+              // small bonus for every non-priority cell
+              static constexpr T GENERAL_AREA_BONUS  = 0.01f;
+
+              // scales the proximity reward when disaster is active
+              static constexpr T DISASTER_PRIORITY   = 5.0f;
 
 
               // Grid discretization
@@ -96,9 +104,11 @@ namespace rl_tools {
 
                 DroneState<T,TI>    drone_states[SPEC::PARAMETERS::N_AGENTS];
                 DisasterState<T>    disaster;
-                bool                occupancy[SPEC::PARAMETERS::GRID_SIZE_X * SPEC::PARAMETERS::GRID_SIZE_Y];
-                // Step counter to track how many steps have elapsed
-                TI                  step_count;
+
+                // store the last step when each cell was visited
+                TI last_visit[SPEC::PARAMETERS::GRID_SIZE_X * SPEC::PARAMETERS::GRID_SIZE_Y];
+
+                TI step_count;
             };
 
 
