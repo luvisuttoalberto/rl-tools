@@ -11,8 +11,8 @@
 
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools {
-    template <typename DEVICE, typename SPEC>
-    struct OilPlatformCPU: public rl::environments::multi_agent::OilPlatform<SPEC> {
+    template<typename DEVICE, typename SPEC>
+    struct OilPlatformCPU : public rl::environments::multi_agent::OilPlatform<SPEC> {
         using ENVIRONMENT = rl::environments::multi_agent::OilPlatform<SPEC>;
         using State = typename ENVIRONMENT::State;
         using Parameters = typename ENVIRONMENT::Parameters;
@@ -20,63 +20,393 @@ namespace rl_tools {
     };
 
     template <typename DEVICE, typename SPEC>
-    std::string json(DEVICE& device, rl::environments::multi_agent::OilPlatform<SPEC>& env, const typename rl::environments::multi_agent::OilPlatform<SPEC>::Parameters& parameters) {
+    std::string json(DEVICE&, rl::environments::multi_agent::OilPlatform<SPEC>& env,
+                     const typename rl::environments::multi_agent::OilPlatform<SPEC>::Parameters& parameters) {
         std::string result = "{";
         result += "\"N_AGENTS\":" + std::to_string(SPEC::PARAMETERS::N_AGENTS) + ",";
-        result += "\"ACTIVE_DRONES\":" + std::to_string(SPEC::PARAMETERS::ACTIVE_DRONES) + ",";
-        result += "\"SENSOR_RANGE\":" + std::to_string(SPEC::PARAMETERS::SENSOR_RANGE) + ",";
         result += "\"GRID_SIZE_X\":" + std::to_string(SPEC::PARAMETERS::GRID_SIZE_X) + ",";
         result += "\"GRID_SIZE_Y\":" + std::to_string(SPEC::PARAMETERS::GRID_SIZE_Y) + ",";
-        result += "\"HIGH_PRIORITY_X\":" + std::to_string(SPEC::PARAMETERS::HIGH_PRIORITY_X) + ",";
-        result += "\"HIGH_PRIORITY_Y\":" + std::to_string(SPEC::PARAMETERS::HIGH_PRIORITY_Y) + ",";
-        result += "\"HIGH_PRIORITY_RADIUS\":" + std::to_string(SPEC::PARAMETERS::HIGH_PRIORITY_RADIUS);
+        result += "\"PLATFORM_HALF_SIZE\":" + std::to_string(SPEC::PARAMETERS::PLATFORM_HALF_SIZE) + ",";
+        result += "\"PIPE_WIDTH\":" + std::to_string(SPEC::PARAMETERS::PIPE_WIDTH) + ",";
+        result += "\"SENSOR_RANGE\":" + std::to_string(SPEC::PARAMETERS::SENSOR_RANGE);
+//        result += "\"DISASTER_DETECTION_GRACE_PERIOD\":" + std::to_string(SPEC::PARAMETERS::DISASTER_DETECTION_GRACE_PERIOD);
         result += "}";
         return result;
     }
 
     template <typename DEVICE, typename SPEC>
-    std::string json(DEVICE& device, rl::environments::multi_agent::OilPlatform<SPEC>& env, const typename rl::environments::multi_agent::OilPlatform<SPEC>::Parameters& parameters, const typename rl::environments::multi_agent::oil_platform::State<SPEC>& state) {
+    std::string json(DEVICE&, rl::environments::multi_agent::OilPlatform<SPEC>& env,
+                     const typename rl::environments::multi_agent::OilPlatform<SPEC>::Parameters& parameters,
+                     const typename rl::environments::multi_agent::oil_platform::State<SPEC>& state) {
         using TI = typename DEVICE::index_t;
+
+        // Create drone states JSON
         std::string drone_states = "[";
-        for(TI i = 0; i < SPEC::PARAMETERS::N_AGENTS; i++) {
-            if(i > 0) {
+        for (TI i = 0; i < SPEC::PARAMETERS::N_AGENTS; i++) {
+            if (i > 0) {
                 drone_states += ",";
             }
             std::string drone_state = "{";
-            drone_state += "\"position\": [" + std::to_string(state.drone_states[i].position[0]) + "," + std::to_string(state.drone_states[i].position[1]) + "],";
-            drone_state += "\"velocity\": [" + std::to_string(state.drone_states[i].velocity[0]) + "," + std::to_string(state.drone_states[i].velocity[1]) + "],";
-            drone_state += "\"acceleration\": [" + std::to_string(state.drone_states[i].acceleration[0]) + "," + std::to_string(state.drone_states[i].acceleration[1]) + "],";
+            drone_state += "\"position\": [" + std::to_string(state.drone_states[i].position[0]) + "," +
+                           std::to_string(state.drone_states[i].position[1]) + "],";
             drone_state += "\"mode\": " + std::to_string(static_cast<int>(state.drone_states[i].mode)) + ",";
-            drone_state += "\"disaster_detected\": " + std::string(state.drone_states[i].disaster_detected ? "true" : "false");
+            drone_state += "\"battery\": " + std::to_string(state.drone_states[i].battery) + ",";
+            drone_state += "\"disaster_detected\": " + std::string(state.drone_states[i].disaster_detected ? "true" : "false") + ",";
+            drone_state += "\"last_detected_disaster_position\": [" + std::to_string(state.drone_states[i].last_detected_disaster_position[0]) + "," + std::to_string(state.drone_states[i].last_detected_disaster_position[1]) + "]";
             drone_state += "}";
             drone_states += drone_state;
         }
         drone_states += "]";
 
+        // Create disaster JSON (always include raw coords)
         std::string disaster = "{";
         disaster += "\"active\": " + std::string(state.disaster.active ? "true" : "false") + ",";
-        disaster += "\"position\": [" + std::to_string(state.disaster.position[0]) + "," + std::to_string(state.disaster.position[1]) + "]";
+        disaster += "\"position\": [" +
+                    std::to_string(state.disaster.position[0]) + "," +
+                    std::to_string(state.disaster.position[1]) + "]";
         disaster += "}";
 
+        // Assemble final JSON
         std::string result = "{";
         result += "\"drone_states\": " + drone_states + ",";
-        result += "\"disaster\": " + disaster;
+        result += "\"disaster\": " + disaster + ",";
+        result += "\"step_count\": " + std::to_string(state.step_count);
+//        result += "\"disaster_undetected_steps\": " + std::to_string(state.disaster_undetected_steps);
         result += "}";
         return result;
     }
 
-    template <typename DEVICE, typename SPEC>
-    std::string get_ui(DEVICE& /*device*/, rl::environments::multi_agent::OilPlatform<SPEC>& /*env*/) {
-        // Dummy UI: preserves init & render interface but does nothing.
-        return R"RL_TOOLS_LITERAL(
-export async function init(canvas, options) {
-    // no-op
-    return {};
+    template<typename DEVICE, typename SPEC>
+    std::string get_ui(DEVICE & /*device*/, rl::environments::multi_agent::OilPlatform<SPEC> & /*env*/) {
+        std::string ui = R"RL_TOOLS_LITERAL(
+export async function init(canvas, parameters, options) {
+    // Performance tip: Set willReadFrequently to true for canvases that will be read often
+    const ctx = canvas.getContext('2d', { willReadFrequently: false });
+
+    // Calculate time for FPS
+    const now = performance.now();
+
+    return {
+        ctx: ctx,
+        lastUpdateTime: now,
+        frameCount: 0,
+        lastFpsUpdate: now,
+        fps: 0
+    };
 }
+
 export async function render(ui_state, parameters, state, action) {
-    // no-op
+    const ctx = ui_state.ctx;
+    const width = ctx.canvas.width;
+    const height = ctx.canvas.height;
+
+    // Calculate FPS
+    const now = performance.now();
+    ui_state.frameCount++;
+
+    if (now - ui_state.lastFpsUpdate > 1000) {
+        ui_state.fps = Math.round((ui_state.frameCount * 1000) / (now - ui_state.lastFpsUpdate));
+        ui_state.frameCount = 0;
+        ui_state.lastFpsUpdate = now;
+    }
+
+    // Clear the canvas
+    ctx.clearRect(0, 0, width, height);
+
+    // Calculate scaling
+    const scaleX = width / parameters.GRID_SIZE_X;
+    const scaleY = height / parameters.GRID_SIZE_Y;
+    const centerX = width / 2;
+    const centerY = height / 2;
+
+    const chargeX = 0;
+    const chargeY = 0;
+
+    // Draw light grid
+    ctx.strokeStyle = '#f0f0f0';
+    ctx.lineWidth = 0.5;
+
+    // Draw grid lines every 5 units for better performance
+    for (let x = 0; x <= parameters.GRID_SIZE_X; x += 5) {
+        ctx.beginPath();
+        ctx.moveTo(x * scaleX, 0);
+        ctx.lineTo(x * scaleX, height);
+        ctx.stroke();
+    }
+
+    for (let y = 0; y <= parameters.GRID_SIZE_Y; y += 5) {
+        ctx.beginPath();
+        ctx.moveTo(0, y * scaleY);
+        ctx.lineTo(width, y * scaleY);
+        ctx.stroke();
+    }
+
+    // Draw platform (center square)
+    const platformHalfSize = parameters.PLATFORM_HALF_SIZE * scaleX;
+    ctx.fillStyle = 'rgba(100, 100, 220, 0.7)';
+    ctx.fillRect(
+        centerX - platformHalfSize,
+        centerY - platformHalfSize,
+        platformHalfSize * 2,
+        platformHalfSize * 2
+    );
+
+    // Add platform border
+    ctx.strokeStyle = 'rgba(50, 50, 150, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(
+        centerX - platformHalfSize,
+        centerY - platformHalfSize,
+        platformHalfSize * 2,
+        platformHalfSize * 2
+    );
+
+    // Draw pipes
+    const pipeWidth = parameters.PIPE_WIDTH * scaleX;
+    ctx.fillStyle = 'rgba(100, 100, 220, 0.6)';
+
+    // Horizontal pipe
+    ctx.fillRect(
+        0,
+        centerY - pipeWidth/2,
+        width,
+        pipeWidth
+    );
+
+    // Vertical pipe
+    ctx.fillRect(
+        centerX - pipeWidth/2,
+        0,
+        pipeWidth,
+        height
+    );
+
+    // Pipe borders
+    ctx.strokeStyle = 'rgba(50, 50, 150, 0.7)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0, centerY - pipeWidth/2, width, pipeWidth);
+    ctx.strokeRect(centerX - pipeWidth/2, 0, pipeWidth, height);
+
+    // Draw charging base (green circle)
+    ctx.fillStyle = 'rgba(100, 200, 100, 0.7)';
+    ctx.beginPath();
+//    ctx.arc(centerX, centerY, scaleX * 0.7, 0, Math.PI * 2);
+    ctx.arc(chargeX, chargeY, scaleX * 0.7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#008800';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Add charging symbol
+    ctx.fillStyle = 'white';
+    ctx.font = '16px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('⚡', centerX, centerY);
+    ctx.fillText('⚡', chargeX, chargeY);
+
+    // Draw disaster if active
+    if (state.disaster && state.disaster.active) {
+        const disasterX = state.disaster.position[0] * scaleX;
+        const disasterY = state.disaster.position[1] * scaleY;
+
+        // Draw disaster area with simple gradient
+        const radius = scaleX * 0.6;
+        const gradient = ctx.createRadialGradient(
+            disasterX, disasterY, radius * 0.2,
+            disasterX, disasterY, radius
+        );
+        gradient.addColorStop(0, 'rgba(255, 0, 0, 0.8)');
+        gradient.addColorStop(1, 'rgba(255, 0, 0, 0.1)');
+
+        ctx.beginPath();
+        ctx.arc(disasterX, disasterY, radius, 0, Math.PI * 2);
+        ctx.fillStyle = gradient;
+        ctx.fill();
+
+        // Draw sensor range indicator
+        ctx.beginPath();
+        ctx.arc(disasterX, disasterY, parameters.SENSOR_RANGE * scaleX, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255, 165, 0, 0.5)';
+        ctx.setLineDash([5, 5]);
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    // Draw drones
+    if (state.drone_states) {
+        const droneRadius = 0.35 * scaleX;
+
+        for (let i = 0; i < state.drone_states.length; i++) {
+            const drone = state.drone_states[i];
+            const posX = drone.position[0] * scaleX;
+            const posY = drone.position[1] * scaleY;
+
+            // Drone color based on mode
+            let fillColor;
+            switch(drone.mode) {
+                case 0: fillColor = '#7DB9B6'; break; // NORMAL
+                case 1: fillColor = '#dc143c'; break; // EMERGENCY
+                case 2: fillColor = '#90EE90'; break; // RECHARGING
+                default: fillColor = '#7DB9B6'; break;
+            }
+
+            // Draw drone body
+            ctx.beginPath();
+            ctx.arc(posX, posY, droneRadius, 0, Math.PI * 2);
+            ctx.fillStyle = fillColor;
+            ctx.fill();
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // Draw drone ID
+            ctx.fillStyle = 'white';
+            ctx.font = `${Math.round(droneRadius * 0.8)}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(i.toString(), posX, posY);
+
+            // Battery indicator
+            const batteryHeight = droneRadius * 0.8;
+            const batteryWidth = droneRadius * 0.2;
+            const batteryX = posX + droneRadius * 1.2;
+            const batteryY = posY - batteryHeight / 2;
+
+            // Battery outline
+            ctx.strokeStyle = '#444';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(batteryX, batteryY, batteryWidth, batteryHeight);
+
+            // Battery fill
+            const fillHeight = (drone.battery / 100) * batteryHeight;
+            const batteryColor = drone.battery > 70 ? 'green' :
+                                drone.battery > 30 ? 'orange' : 'red';
+
+            ctx.fillStyle = batteryColor;
+            ctx.fillRect(
+                batteryX,
+                batteryY + batteryHeight - fillHeight,
+                batteryWidth,
+                fillHeight
+            );
+
+            // Draw sensor range circle if in normal mode
+            if (drone.mode === 0 || drone.mode === 1) {
+                ctx.beginPath();
+                ctx.arc(posX, posY, parameters.SENSOR_RANGE * scaleX, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(100, 100, 200, 0.15)';
+                ctx.setLineDash([2, 3]);
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+        }
+    }
+
+    // Draw step count and other info
+    ctx.fillStyle = 'black';
+    ctx.font = '14px Arial';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(`Step: ${state.step_count} | FPS: ${ui_state.fps || 0}`, 10, 10);
+
+    // Disaster status if active
+    if (state.disaster && state.disaster.active) {
+        ctx.fillStyle = 'red';
+        ctx.fillText(`DISASTER ACTIVE`, 10, 30);
+
+        // show exact coords
+        ctx.fillStyle = 'black';
+        ctx.font = '12px Arial';
+        ctx.fillText(
+          `Location: (${state.disaster.position[0].toFixed(1)}, ` +
+          `${state.disaster.position[1].toFixed(1)})`,
+          10, 50
+        );
+
+        // Check if detected
+        let detected = false;
+        for (const drone of state.drone_states) {
+            if (drone.disaster_detected) {
+                detected = true;
+                break;
+            }
+        }
+
+        if (detected) {
+            ctx.fillStyle = 'green';
+            ctx.fillText(`DETECTED`, 150, 30);
+        } else {
+            ctx.fillStyle = 'orange';
+            ctx.fillText(`UNDETECTED`, 150, 30);
+        }
+    }
+
+    // Display critical battery status
+    let criticalCount = 0;
+    let lowCount = 0;
+
+    for (const drone of state.drone_states) {
+        if (drone.battery < 20) criticalCount++;
+        else if (drone.battery < 50) lowCount++;
+    }
+
+    if (criticalCount > 0) {
+        ctx.fillStyle = 'red';
+        ctx.fillText(`${criticalCount} drones critical`, 10, height - 20);
+    }
+
+    if (lowCount > 0) {
+        ctx.fillStyle = 'orange';
+        ctx.fillText(`${lowCount} drones low battery`, 10, height - 40);
+    }
+
+    // Add battery percentages for each drone at the bottom left
+    if (state.drone_states && state.drone_states.length > 0) {
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+
+        // Create a background for better readability
+        const padding = 5;
+        const lineHeight = 16;
+        const textWidth = 100;
+        const boxHeight = state.drone_states.length * lineHeight + padding * 2;
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.fillRect(10, height - 60 - boxHeight, textWidth, boxHeight);
+        ctx.strokeStyle = '#ddd';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(10, height - 60 - boxHeight, textWidth, boxHeight);
+
+        // Draw the battery percentages
+        state.drone_states.forEach((drone, i) => {
+            const batteryValue = Math.round(drone.battery);
+            let color;
+
+            if (batteryValue > 70) color = 'green';
+            else if (batteryValue > 30) color = 'orange';
+            else color = 'red';
+
+            // Get mode name
+            let modeName;
+            switch(drone.mode) {
+                case 0: modeName = "NORMAL"; break;
+                case 1: modeName = "EMERGENCY"; break;
+                case 2: modeName = "CHARGING"; break;
+                default: modeName = "UNKNOWN"; break;
+            }
+
+            ctx.fillStyle = color;
+            const y = height - 60 - boxHeight + padding + i * lineHeight;
+            ctx.fillText(`Drone ${i}: ${batteryValue}% (${modeName})`, 15, y);
+        });
+    }
 }
-)RL_TOOLS_LITERAL";
+    )RL_TOOLS_LITERAL";
+        return ui;
     }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END

@@ -69,6 +69,13 @@ target_compile_definitions(rl_zoo_bottleneck_v0_ppo PRIVATE RL_TOOLS_RL_ZOO_ALGO
 target_compile_definitions(rl_zoo_bottleneck_v0_ppo PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_BOTTLENECK_V0)
 target_compile_options(rl_zoo_bottleneck_v0_ppo PRIVATE -Ofast -march=native)
 
+add_executable(rl_zoo_oil_platform-v1_sac zoo_cli.cpp zoo.cpp)
+target_link_libraries(rl_zoo_oil_platform-v1_sac PRIVATE RLtools::RLtools)
+RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_oil_platform-v1_sac)
+target_compile_definitions(rl_zoo_oil_platform-v1_sac PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_SAC)
+target_compile_definitions(rl_zoo_oil_platform-v1_sac PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_OIL_PLATFORM)
+target_compile_options(rl_zoo_oil_platform-v1_sac PRIVATE -Ofast -march=native)
+
 if(RL_TOOLS_RL_ENVIRONMENTS_ENABLE_MUJOCO)
     # Ant-v4
     # PPO

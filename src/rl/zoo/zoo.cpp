@@ -43,6 +43,7 @@
 #include "l2f/sac.h"
 #include "l2f/td3.h"
 #include "l2f/ppo.h"
+#include "oil_platform-v1/sac.h"
 #ifdef RL_TOOLS_RL_ZOO_ENVIRONMENT_ANT_V4
 #include "ant-v4/ppo.h"
 #include "ant-v4/td3.h"
@@ -99,6 +100,10 @@ template <typename BASE>
 using LOOP_EVALUATION_PARAMETER_OVERWRITES = rlt::rl::zoo::acrobot_swingup_v0::sac::FACTORY<DEVICE, T, TI, RNG>::LOOP_EVALUATION_PARAMETER_OVERWRITES<BASE>;
 #elif defined(RL_TOOLS_RL_ZOO_ENVIRONMENT_L2F)
 using LOOP_CORE_CONFIG = rlt::rl::zoo::l2f::sac::FACTORY<DEVICE, T, TI, RNG>::LOOP_CORE_CONFIG;
+template <typename BASE>
+struct LOOP_EVALUATION_PARAMETER_OVERWRITES: BASE{};
+#elif defined(RL_TOOLS_RL_ZOO_ENVIRONMENT_OIL_PLATFORM)
+using LOOP_CORE_CONFIG = rlt::rl::zoo::oil_platform_v1::sac::FACTORY<DEVICE, T, TI, RNG>::LOOP_CORE_CONFIG;
 template <typename BASE>
 struct LOOP_EVALUATION_PARAMETER_OVERWRITES: BASE{};
 #else
@@ -197,6 +202,8 @@ std::string environment = "bottleneck-v0";
 std::string environment = "ant-v4";
 #elif defined(RL_TOOLS_RL_ZOO_ENVIRONMENT_L2F)
 std::string environment = "l2f";
+#elif defined(RL_TOOLS_RL_ZOO_ENVIRONMENT_OIL_PLATFORM)
+std::string environment = "oil_platform-v1";
 #else
 #error "RLtools Zoo: Environment not defined"
 #endif
