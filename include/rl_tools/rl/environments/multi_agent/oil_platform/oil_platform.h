@@ -80,7 +80,7 @@ namespace rl_tools {
                         using PARAMETERS = T_PARAMETERS;
                         using T = typename PARAMETERS::T;
                         using TI = typename PARAMETERS::TI;
-                        static constexpr TI PER_AGENT_DIM = 12; // pos(2), vel(2), acc(2), mode(1), disaster_detected(1), last_detected_disaster_position(2)
+                        static constexpr TI PER_AGENT_DIM = 9; // pos(2), vel(2), mode(2), disaster_detected(1), last_detected_disaster_position(2)
                         static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_DIM;
                     };
 
@@ -90,7 +90,6 @@ namespace rl_tools {
                         T          velocity[2];
                         T          acceleration[2];
                         DroneMode  mode;
-                        bool       disaster_detected;
                         T          battery;         // [0–100]%
                         T          last_detected_disaster_position[2]; // (–1,–1) until first detection
                     };

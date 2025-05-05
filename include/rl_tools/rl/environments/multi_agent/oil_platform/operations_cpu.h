@@ -29,16 +29,16 @@ namespace rl_tools {
         result += "\"PLATFORM_HALF_SIZE\":" + std::to_string(SPEC::PARAMETERS::PLATFORM_HALF_SIZE) + ",";
         result += "\"PIPE_WIDTH\":" + std::to_string(SPEC::PARAMETERS::PIPE_WIDTH) + ",";
         result += "\"SENSOR_RANGE\":" + std::to_string(SPEC::PARAMETERS::SENSOR_RANGE);
-//        result += "\"DISASTER_DETECTION_GRACE_PERIOD\":" + std::to_string(SPEC::PARAMETERS::DISASTER_DETECTION_GRACE_PERIOD);
         result += "}";
         return result;
     }
 
     template <typename DEVICE, typename SPEC>
-    std::string json(DEVICE&, rl::environments::multi_agent::OilPlatform<SPEC>& env,
+    std::string json(DEVICE& device, rl::environments::multi_agent::OilPlatform<SPEC>& env,
                      const typename rl::environments::multi_agent::OilPlatform<SPEC>::Parameters& parameters,
                      const typename rl::environments::multi_agent::oil_platform::State<SPEC>& state) {
         using TI = typename DEVICE::index_t;
+        using T = typename SPEC::T;
 
         // Create drone states JSON
         std::string drone_states = "[";
@@ -46,19 +46,31 @@ namespace rl_tools {
             if (i > 0) {
                 drone_states += ",";
             }
+
+            // Calculate disaster_detected on-the-fly for JSON output
+            bool is_detecting = false;
+            if (state.disaster.active && state.drone_states[i].mode != DroneMode::RECHARGING) {
+                T dx = state.drone_states[i].position[0] - state.disaster.position[0];
+                T dy = state.drone_states[i].position[1] - state.disaster.position[1];
+                T dist = magnitude(device, dx, dy);
+                is_detecting = (dist < parameters.SENSOR_RANGE);
+            }
+
             std::string drone_state = "{";
             drone_state += "\"position\": [" + std::to_string(state.drone_states[i].position[0]) + "," +
                            std::to_string(state.drone_states[i].position[1]) + "],";
             drone_state += "\"mode\": " + std::to_string(static_cast<int>(state.drone_states[i].mode)) + ",";
             drone_state += "\"battery\": " + std::to_string(state.drone_states[i].battery) + ",";
-            drone_state += "\"disaster_detected\": " + std::string(state.drone_states[i].disaster_detected ? "true" : "false") + ",";
-            drone_state += "\"last_detected_disaster_position\": [" + std::to_string(state.drone_states[i].last_detected_disaster_position[0]) + "," + std::to_string(state.drone_states[i].last_detected_disaster_position[1]) + "]";
+            drone_state += "\"disaster_detected\": " + std::string(is_detecting ? "true" : "false") + ",";
+            drone_state += "\"last_detected_disaster_position\": [" +
+                           std::to_string(state.drone_states[i].last_detected_disaster_position[0]) + "," +
+                           std::to_string(state.drone_states[i].last_detected_disaster_position[1]) + "]";
             drone_state += "}";
             drone_states += drone_state;
         }
         drone_states += "]";
 
-        // Create disaster JSON (always include raw coords)
+        // Create disaster JSON
         std::string disaster = "{";
         disaster += "\"active\": " + std::string(state.disaster.active ? "true" : "false") + ",";
         disaster += "\"position\": [" +
@@ -71,7 +83,6 @@ namespace rl_tools {
         result += "\"drone_states\": " + drone_states + ",";
         result += "\"disaster\": " + disaster + ",";
         result += "\"step_count\": " + std::to_string(state.step_count);
-//        result += "\"disaster_undetected_steps\": " + std::to_string(state.disaster_undetected_steps);
         result += "}";
         return result;
     }
@@ -202,7 +213,7 @@ export async function render(ui_state, parameters, state, action) {
     ctx.font = '16px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('⚡', centerX, centerY);
+//    ctx.fillText('⚡', centerX, centerY);
     ctx.fillText('⚡', chargeX, chargeY);
 
     // Draw disaster if active
@@ -317,14 +328,6 @@ export async function render(ui_state, parameters, state, action) {
         ctx.fillStyle = 'red';
         ctx.fillText(`DISASTER ACTIVE`, 10, 30);
 
-        // show exact coords
-        ctx.fillStyle = 'black';
-        ctx.font = '12px Arial';
-        ctx.fillText(
-          `Location: (${state.disaster.position[0].toFixed(1)}, ` +
-          `${state.disaster.position[1].toFixed(1)})`,
-          10, 50
-        );
 
         // Check if detected
         let detected = false;
@@ -343,6 +346,16 @@ export async function render(ui_state, parameters, state, action) {
             ctx.fillText(`UNDETECTED`, 150, 30);
         }
     }
+
+    // show exact disaster coords
+    ctx.fillStyle = 'black';
+    ctx.font = '12px Arial';
+    ctx.fillText(
+      `Location: (${state.drone_states[0].last_detected_disaster_position[0].toFixed(1)}, ` +
+      `${state.drone_states[0].last_detected_disaster_position[0].toFixed(1)})`,
+      10, 50
+    );
+
 
     // Display critical battery status
     let criticalCount = 0;
