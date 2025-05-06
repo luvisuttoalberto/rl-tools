@@ -18,7 +18,7 @@
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools {
     // Pull in the inner-namespace types so we can refer to them unqualified:
-    using rl::environments::multi_agent::oil_platform::DroneMode;
+//    using rl::environments::multi_agent::oil_platform::DroneMode;
     using rl::environments::multi_agent::oil_platform::Observation;
 
     // 1) Nothing to malloc/free/init at the env‐level for now
@@ -90,8 +90,8 @@ namespace rl_tools {
             d.acceleration[1] = T(0);
 
             // Randomly assign modes based on shuffled indices
-            d.mode = (std::find(drone_indices.begin(), drone_indices.begin() + parameters.ACTIVE_DRONES, i) != drone_indices.begin() + parameters.ACTIVE_DRONES)
-                     ? DroneMode::NORMAL : DroneMode::RECHARGING;
+//            d.mode = (std::find(drone_indices.begin(), drone_indices.begin() + parameters.ACTIVE_DRONES, i) != drone_indices.begin() + parameters.ACTIVE_DRONES)
+//                     ? DroneMode::NORMAL : DroneMode::RECHARGING;
 
             d.battery = T(95);  // Start with higher battery level
             d.last_detected_disaster_position[0] = T(-1);
@@ -122,7 +122,7 @@ namespace rl_tools {
             d.velocity[1] = T(0);
             d.acceleration[0] = T(0);
             d.acceleration[1] = T(0);
-            d.mode = (i < parameters.ACTIVE_DRONES ? DroneMode::NORMAL : DroneMode::RECHARGING);
+//            d.mode = (i < parameters.ACTIVE_DRONES ? DroneMode::NORMAL : DroneMode::RECHARGING);
             d.battery = T(95);  // Start with higher battery level
             d.last_detected_disaster_position[0] = T(-1);
             d.last_detected_disaster_position[1] = T(-1);
@@ -219,7 +219,7 @@ namespace rl_tools {
             if (next_state.disaster.active) {
                 for (TI i = 0; i < parameters.N_AGENTS; ++i) {
                     const auto &d = state.drone_states[i];
-                    if (d.mode == DroneMode::RECHARGING) continue;
+//                    if (d.mode == DroneMode::RECHARGING) continue;
 
                     // Calculate distance to disaster
                     T dx = d.position[0] - next_state.disaster.position[0];
@@ -250,77 +250,77 @@ namespace rl_tools {
 
             // Improved battery management
             // Switch to RECHARGING mode when battery gets low
-            if (old_d.mode != DroneMode::RECHARGING && old_d.battery < T(40)) {
-                new_d.mode = DroneMode::RECHARGING;
-            }
+//            if (old_d.mode != DroneMode::RECHARGING && old_d.battery < T(40)) {
+//                new_d.mode = DroneMode::RECHARGING;
+//            }
 
             // Handle recharging and battery updates
-            if (old_d.mode == DroneMode::RECHARGING) {
-                // Check if the drone is at the recharging station (center of the grid)
-                const T chargeX = T(0);
-                const T chargeY = T(0);
-                const T dx = old_d.position[0] - chargeX;
-                const T dy = old_d.position[1] - chargeY;
-                const T distance = math::sqrt(device.math, dx * dx + dy * dy);
-
-                // Only recharge if the drone is close enough to the center
-                if (distance < 1.0) {
-                    new_d.battery = std::min(T(100), old_d.battery + parameters.RECHARGE_RATE);
-                } else {
-                    // Still discharge but at a lower rate when in RECHARGING mode
-                    new_d.battery = std::max(T(0), old_d.battery - parameters.DISCHARGE_RATE * T(0.5));
-                }
-            } else {
-                new_d.battery = std::max(T(0), old_d.battery - parameters.DISCHARGE_RATE);
-            }
-
+//            if (old_d.mode == DroneMode::RECHARGING) {
+//                // Check if the drone is at the recharging station (center of the grid)
+//                const T chargeX = T(0);
+//                const T chargeY = T(0);
+//                const T dx = old_d.position[0] - chargeX;
+//                const T dy = old_d.position[1] - chargeY;
+//                const T distance = math::sqrt(device.math, dx * dx + dy * dy);
+//
+//                // Only recharge if the drone is close enough to the center
+//                if (distance < 1.0) {
+//                    new_d.battery = std::min(T(100), old_d.battery + parameters.RECHARGE_RATE);
+//                } else {
+//                    // Still discharge but at a lower rate when in RECHARGING mode
+//                    new_d.battery = std::max(T(0), old_d.battery - parameters.DISCHARGE_RATE * T(0.5));
+//                }
+//            } else {
+//                new_d.battery = std::max(T(0), old_d.battery - parameters.DISCHARGE_RATE);
+//            }
+            new_d.battery = old_d.battery;
             // Calculate acceleration based on drone mode and current state
             T ax = T(0), ay = T(0);
 
-            if (old_d.mode == DroneMode::RECHARGING) {
-                // Get vector to base station (center of grid)
-                T chargeX = T(0);
-                T chargeY = T(0);
-                T dx = chargeX - old_d.position[0];
-                T dy = chargeY - old_d.position[1];
-                T dist = math::sqrt(device.math, dx * dx + dy * dy) + 1e-6f;
-
-                if (dist < 0.5) {
-                    // When very close to base, apply strong braking force
-                    new_d.velocity[0] = old_d.velocity[0] * T(0.3); // Damping factor
-                    new_d.velocity[1] = old_d.velocity[1] * T(0.3);
-
-                    if (math::sqrt(device.math, new_d.velocity[0]*new_d.velocity[0] + new_d.velocity[1]*new_d.velocity[1]) < T(0.1)) {
-                        new_d.velocity[0] = T(0);
-                        new_d.velocity[1] = T(0);
-                    }
-                }
-                else if (dist < 2.0) {
-                    T approach_speed = std::min(dist * T(0.8), T(1.0));
-                    T target_vx = dx / dist * approach_speed;
-                    T target_vy = dy / dist * approach_speed;
-                    ax = (target_vx - old_d.velocity[0]) / parameters.DT * T(0.7);
-                    ay = (target_vy - old_d.velocity[1]) / parameters.DT * T(0.7);
-                }
-                else {
-                    T approach_speed = std::min(T(2.0), dist * T(0.2));
-                    T target_vx = dx / dist * approach_speed;
-                    T target_vy = dy / dist * approach_speed;
-                    ax = (target_vx - old_d.velocity[0]) / parameters.DT * T(0.7);
-                    ay = (target_vy - old_d.velocity[1]) / parameters.DT * T(0.7);
-                }
-
-                // Limit acceleration magnitude to MAX_ACCELERATION
-                T accel_mag = magnitude(device, ax, ay);
-                if (accel_mag > parameters.MAX_ACCELERATION) {
-                    T scale = parameters.MAX_ACCELERATION / accel_mag;
-                    ax *= scale;
-                    ay *= scale;
-                }
-            } else {
-                ax = get(action, 0, i * 2 + 0) * parameters.MAX_ACCELERATION;
-                ay = get(action, 0, i * 2 + 1) * parameters.MAX_ACCELERATION;
-            }
+//            if (old_d.mode == DroneMode::RECHARGING) {
+//                // Get vector to base station (center of grid)
+//                T chargeX = T(0);
+//                T chargeY = T(0);
+//                T dx = chargeX - old_d.position[0];
+//                T dy = chargeY - old_d.position[1];
+//                T dist = math::sqrt(device.math, dx * dx + dy * dy) + 1e-6f;
+//
+//                if (dist < 0.5) {
+//                    // When very close to base, apply strong braking force
+//                    new_d.velocity[0] = old_d.velocity[0] * T(0.3); // Damping factor
+//                    new_d.velocity[1] = old_d.velocity[1] * T(0.3);
+//
+//                    if (math::sqrt(device.math, new_d.velocity[0]*new_d.velocity[0] + new_d.velocity[1]*new_d.velocity[1]) < T(0.1)) {
+//                        new_d.velocity[0] = T(0);
+//                        new_d.velocity[1] = T(0);
+//                    }
+//                }
+//                else if (dist < 2.0) {
+//                    T approach_speed = std::min(dist * T(0.8), T(1.0));
+//                    T target_vx = dx / dist * approach_speed;
+//                    T target_vy = dy / dist * approach_speed;
+//                    ax = (target_vx - old_d.velocity[0]) / parameters.DT * T(0.7);
+//                    ay = (target_vy - old_d.velocity[1]) / parameters.DT * T(0.7);
+//                }
+//                else {
+//                    T approach_speed = std::min(T(2.0), dist * T(0.2));
+//                    T target_vx = dx / dist * approach_speed;
+//                    T target_vy = dy / dist * approach_speed;
+//                    ax = (target_vx - old_d.velocity[0]) / parameters.DT * T(0.7);
+//                    ay = (target_vy - old_d.velocity[1]) / parameters.DT * T(0.7);
+//                }
+//
+//                // Limit acceleration magnitude to MAX_ACCELERATION
+//                T accel_mag = magnitude(device, ax, ay);
+//                if (accel_mag > parameters.MAX_ACCELERATION) {
+//                    T scale = parameters.MAX_ACCELERATION / accel_mag;
+//                    ax *= scale;
+//                    ay *= scale;
+//                }
+//            } else {
+            ax = get(action, 0, i * 2 + 0) * parameters.MAX_ACCELERATION;
+            ay = get(action, 0, i * 2 + 1) * parameters.MAX_ACCELERATION;
+//            }
 
             // integrate acceleration to get new velocity
             new_d.velocity[0] = old_d.velocity[0] + ax * parameters.DT;
@@ -344,7 +344,7 @@ namespace rl_tools {
 
             new_d.acceleration[0] = ax;
             new_d.acceleration[1] = ay;
-            new_d.mode = old_d.mode;
+//            new_d.mode = old_d.mode;
 
             // Copy last_detected_disaster_position if it wasn't updated above
             if (!any_detection) {
@@ -354,27 +354,27 @@ namespace rl_tools {
         }
 
         // (5) Immediate swap: any drone that reaches 100% battery swaps with lowest-charge active drone
-        for (TI i = 0; i < parameters.N_AGENTS; ++i) {
-            const auto &old_d = state.drone_states[i];
-            if (old_d.mode != DroneMode::RECHARGING) continue;
-            const auto &new_d = next_state.drone_states[i];
-            if (new_d.battery >= T(100)) {
-                TI low_i = -1;
-                T low_b = std::numeric_limits<T>::infinity();
-                for (TI j = 0; j < parameters.N_AGENTS; ++j) {
-                    const auto &cand = next_state.drone_states[j];
-                    if (cand.mode == DroneMode::RECHARGING) continue;
-                    if (cand.battery < low_b) {
-                        low_b = cand.battery;
-                        low_i = j;
-                    }
-                }
-                if (low_i >= 0) {
-                    next_state.drone_states[i].mode = DroneMode::NORMAL;
-                    next_state.drone_states[low_i].mode = DroneMode::RECHARGING;
-                }
-            }
-        }
+//        for (TI i = 0; i < parameters.N_AGENTS; ++i) {
+//            const auto &old_d = state.drone_states[i];
+//            if (old_d.mode != DroneMode::RECHARGING) continue;
+//            const auto &new_d = next_state.drone_states[i];
+//            if (new_d.battery >= T(100)) {
+//                TI low_i = -1;
+//                T low_b = std::numeric_limits<T>::infinity();
+//                for (TI j = 0; j < parameters.N_AGENTS; ++j) {
+//                    const auto &cand = next_state.drone_states[j];
+//                    if (cand.mode == DroneMode::RECHARGING) continue;
+//                    if (cand.battery < low_b) {
+//                        low_b = cand.battery;
+//                        low_i = j;
+//                    }
+//                }
+//                if (low_i >= 0) {
+//                    next_state.drone_states[i].mode = DroneMode::NORMAL;
+//                    next_state.drone_states[low_i].mode = DroneMode::RECHARGING;
+//                }
+//            }
+//        }
 
         // (7) Advance step count
         next_state.step_count = state.step_count + 1;
@@ -399,9 +399,9 @@ namespace rl_tools {
         // Count active drones
         TI active_count = TI(0);
         for (TI i = 0; i < parameters.N_AGENTS; ++i) {
-            if (next_state.drone_states[i].mode != DroneMode::RECHARGING) {
+//            if (next_state.drone_states[i].mode != DroneMode::RECHARGING) {
                 ++active_count;
-            }
+//            }
         }
 
         if (active_count == 0) return T(0);
@@ -417,7 +417,7 @@ namespace rl_tools {
 
             for (TI i = 0; i < parameters.N_AGENTS; ++i) {
                 const auto &d = next_state.drone_states[i];
-                if (d.mode == DroneMode::RECHARGING) continue;
+//                if (d.mode == DroneMode::RECHARGING) continue;
 
                 // Calculate on-the-fly if this drone is detecting the disaster
                 T dx = d.position[0] - next_state.disaster.position[0];
@@ -452,7 +452,7 @@ namespace rl_tools {
 
                 for (TI i = 0; i < parameters.N_AGENTS; ++i) {
                     const auto &d = next_state.drone_states[i];
-                    if (d.mode == DroneMode::RECHARGING) continue;
+//                    if (d.mode == DroneMode::RECHARGING) continue;
 
                     // Check if drone is in high-priority area
                     T x = d.position[0], y = d.position[1];
@@ -487,7 +487,7 @@ namespace rl_tools {
 
             for (TI i = 0; i < parameters.N_AGENTS; ++i) {
                 const auto &d = next_state.drone_states[i];
-                if (d.mode == DroneMode::RECHARGING) continue;
+//                if (d.mode == DroneMode::RECHARGING) continue;
 
                 // Check drone's position relative to high-priority areas
                 T x = d.position[0], y = d.position[1];
@@ -515,7 +515,7 @@ namespace rl_tools {
                 if (active_count > 1) {
                     for (TI j = i + 1; j < parameters.N_AGENTS; ++j) {
                         const auto &d2 = next_state.drone_states[j];
-                        if (d2.mode == DroneMode::RECHARGING) continue;
+//                        if (d2.mode == DroneMode::RECHARGING) continue;
 
                         T dx = d.position[0] - d2.position[0];
                         T dy = d.position[1] - d2.position[1];
@@ -586,18 +586,19 @@ namespace rl_tools {
 //            set(observation, 0, i * D + 4, (T) d.mode);
 
             // Mode (one-hot encoded: NORMAL and RECHARGING)
-            set(observation, 0, i * D + 4, d.mode == DroneMode::NORMAL ? T(1) : T(0));
-            set(observation, 0, i * D + 5, d.mode == DroneMode::RECHARGING ? T(1) : T(0));
+//            set(observation, 0, i * D + 4, d.mode == DroneMode::NORMAL ? T(1) : T(0));
+//            set(observation, 0, i * D + 5, d.mode == DroneMode::RECHARGING ? T(1) : T(0));
 
             // Calculate disaster_detected on-the-fly
             bool is_detecting = false;
-            if (state.disaster.active && d.mode != DroneMode::RECHARGING) {
+//            if (state.disaster.active && d.mode != DroneMode::RECHARGING) {
+            if (state.disaster.active) {
                 T dx = d.position[0] - state.disaster.position[0];
                 T dy = d.position[1] - state.disaster.position[1];
                 T dist = magnitude(device, dx, dy);
                 is_detecting = (dist < parameters.SENSOR_RANGE);
             }
-            set(observation, 0, i * D + 6, is_detecting ? T(1) : T(0));
+            set(observation, 0, i * D + 4, is_detecting ? T(1) : T(0));
 
 //            // Current disaster position (only if active)
 //            if (state.disaster.active) {
@@ -609,8 +610,8 @@ namespace rl_tools {
 //            }
 
             // Last detected disaster position (shared knowledge)
-            set(observation, 0, i * D + 7, d.last_detected_disaster_position[0]);
-            set(observation, 0, i * D + 8, d.last_detected_disaster_position[1]);
+            set(observation, 0, i * D + 5, d.last_detected_disaster_position[0]);
+            set(observation, 0, i * D + 6, d.last_detected_disaster_position[1]);
         }
     }
 
@@ -628,21 +629,21 @@ namespace rl_tools {
         using TI = typename SPEC::TI;
 
         // Check for critically low battery (below 5% instead of 0%)
-        for (TI i = 0; i < parameters.N_AGENTS; ++i) {
-            if (state.drone_states[i].battery <= T(5)) {
-                return true;
-            }
-        }
+//        for (TI i = 0; i < parameters.N_AGENTS; ++i) {
+//            if (state.drone_states[i].battery <= T(5)) {
+//                return true;
+//            }
+//        }
 
         // Check if disaster left the environment
-        if (state.disaster.active) {
-            if (state.disaster.position[0] < 0 ||
-                state.disaster.position[0] >= parameters.GRID_SIZE_X ||
-                state.disaster.position[1] < 0 ||
-                state.disaster.position[1] >= parameters.GRID_SIZE_Y) {
-                return true;
-            }
-        }
+//        if (state.disaster.active) {
+//            if (state.disaster.position[0] < 0 ||
+//                state.disaster.position[0] >= parameters.GRID_SIZE_X ||
+//                state.disaster.position[1] < 0 ||
+//                state.disaster.position[1] >= parameters.GRID_SIZE_Y) {
+//                return true;
+//            }
+//        }
 
         // Standard step‐limit check
         return state.step_count >= parameters.EPISODE_STEP_LIMIT;

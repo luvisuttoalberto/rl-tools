@@ -49,7 +49,8 @@ namespace rl_tools {
 
             // Calculate disaster_detected on-the-fly for JSON output
             bool is_detecting = false;
-            if (state.disaster.active && state.drone_states[i].mode != DroneMode::RECHARGING) {
+            if (state.disaster.active) {
+//                if (state.disaster.active && state.drone_states[i].mode != DroneMode::RECHARGING) {
                 T dx = state.drone_states[i].position[0] - state.disaster.position[0];
                 T dy = state.drone_states[i].position[1] - state.disaster.position[1];
                 T dist = magnitude(device, dx, dy);
@@ -59,7 +60,7 @@ namespace rl_tools {
             std::string drone_state = "{";
             drone_state += "\"position\": [" + std::to_string(state.drone_states[i].position[0]) + "," +
                            std::to_string(state.drone_states[i].position[1]) + "],";
-            drone_state += "\"mode\": " + std::to_string(static_cast<int>(state.drone_states[i].mode)) + ",";
+//            drone_state += "\"mode\": " + std::to_string(static_cast<int>(state.drone_states[i].mode)) + ",";
             drone_state += "\"battery\": " + std::to_string(state.drone_states[i].battery) + ",";
             drone_state += "\"disaster_detected\": " + std::string(is_detecting ? "true" : "false") + ",";
             drone_state += "\"last_detected_disaster_position\": [" +
@@ -256,12 +257,14 @@ export async function render(ui_state, parameters, state, action) {
 
             // Drone color based on mode
             let fillColor;
-            switch(drone.mode) {
-                case 0: fillColor = '#7DB9B6'; break; // NORMAL
-                case 1: fillColor = '#dc143c'; break; // EMERGENCY
-                case 2: fillColor = '#90EE90'; break; // RECHARGING
-                default: fillColor = '#7DB9B6'; break;
-            }
+//            switch(drone.mode) {
+//                case 0: fillColor = '#7DB9B6'; break; // NORMAL
+//                case 1: fillColor = '#dc143c'; break; // EMERGENCY
+//                case 2: fillColor = '#90EE90'; break; // RECHARGING
+//                default: fillColor = '#7DB9B6'; break;
+//            }
+
+            fillColor = '#7DB9B6'
 
             // Draw drone body
             ctx.beginPath();
@@ -304,7 +307,7 @@ export async function render(ui_state, parameters, state, action) {
             );
 
             // Draw sensor range circle if in normal mode
-            if (drone.mode === 0 || drone.mode === 1) {
+//            if (drone.mode === 0 || drone.mode === 1) {
                 ctx.beginPath();
                 ctx.arc(posX, posY, parameters.SENSOR_RANGE * scaleX, 0, Math.PI * 2);
                 ctx.strokeStyle = 'rgba(100, 100, 200, 0.15)';
@@ -312,7 +315,7 @@ export async function render(ui_state, parameters, state, action) {
                 ctx.lineWidth = 1;
                 ctx.stroke();
                 ctx.setLineDash([]);
-            }
+//            }
         }
     }
 
@@ -352,7 +355,7 @@ export async function render(ui_state, parameters, state, action) {
     ctx.font = '12px Arial';
     ctx.fillText(
       `Location: (${state.drone_states[0].last_detected_disaster_position[0].toFixed(1)}, ` +
-      `${state.drone_states[0].last_detected_disaster_position[0].toFixed(1)})`,
+      `${state.drone_states[0].last_detected_disaster_position[1].toFixed(1)})`,
       10, 50
     );
 
@@ -404,17 +407,17 @@ export async function render(ui_state, parameters, state, action) {
             else color = 'red';
 
             // Get mode name
-            let modeName;
-            switch(drone.mode) {
-                case 0: modeName = "NORMAL"; break;
-                case 1: modeName = "EMERGENCY"; break;
-                case 2: modeName = "CHARGING"; break;
-                default: modeName = "UNKNOWN"; break;
-            }
+//            let modeName;
+//            switch(drone.mode) {
+//                case 0: modeName = "NORMAL"; break;
+//                case 1: modeName = "EMERGENCY"; break;
+//                case 2: modeName = "CHARGING"; break;
+//                default: modeName = "UNKNOWN"; break;
+//            }
 
             ctx.fillStyle = color;
             const y = height - 60 - boxHeight + padding + i * lineHeight;
-            ctx.fillText(`Drone ${i}: ${batteryValue}% (${modeName})`, 15, y);
+//            ctx.fillText(`Drone ${i}: ${batteryValue}% (${modeName})`, 15, y);
         });
     }
 }

@@ -18,18 +18,18 @@ namespace rl_tools {
                 namespace oil_platform {
 
                     // Drone modes
-                    enum class DroneMode {
-                        NORMAL = 0,
-                        EMERGENCY = 1,
-                        RECHARGING = 2
-                    };
+//                    enum class DroneMode {
+//                        NORMAL = 0,
+//                        EMERGENCY = 1,
+//                        RECHARGING = 2
+//                    };
 
                     template <typename T_T, typename T_TI>
                     struct DefaultParameters {
                         using T = T_T;
                         using TI = T_TI;
                         // Number of drones total and deployed
-                        static constexpr TI N_AGENTS           = 5;
+                        static constexpr TI N_AGENTS           = 3;
                         static constexpr TI ACTIVE_DRONES      = 3;
 
                         // Sensing & motion
@@ -65,8 +65,8 @@ namespace rl_tools {
                         static constexpr TI EPISODE_STEP_LIMIT = 1000;
 
                         // Battery & recharging parameters - improved values
-                        static constexpr T RECHARGE_RATE       = 1.5;   // Increased from 1.0 (% per step at base)
-                        static constexpr T DISCHARGE_RATE      = 0.15;  // Reduced from 0.5 (% per step in flight)
+//                        static constexpr T RECHARGE_RATE       = 1.5;   // Increased from 1.0 (% per step at base)
+//                        static constexpr T DISCHARGE_RATE      = 0.15;  // Reduced from 0.5 (% per step in flight)
                         static constexpr TI FULLY_CHARGED_STEPS = 3;    // Reduced from 5 (steps at 100% before swap)
 
                         // Grace period before disaster detection penalty
@@ -80,7 +80,7 @@ namespace rl_tools {
                         using PARAMETERS = T_PARAMETERS;
                         using T = typename PARAMETERS::T;
                         using TI = typename PARAMETERS::TI;
-                        static constexpr TI PER_AGENT_DIM = 9; // pos(2), vel(2), mode(2), disaster_detected(1), last_detected_disaster_position(2)
+                        static constexpr TI PER_AGENT_DIM = 7; // pos(2), vel(2), disaster_detected(1), last_detected_disaster_position(2)
                         static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_DIM;
                     };
 
@@ -89,7 +89,7 @@ namespace rl_tools {
                         T          position[2];
                         T          velocity[2];
                         T          acceleration[2];
-                        DroneMode  mode;
+//                        DroneMode  mode;
                         T          battery;         // [0–100]%
                         T          last_detected_disaster_position[2]; // (–1,–1) until first detection
                     };
