@@ -71,19 +71,23 @@ namespace rl_tools {
         }
         drone_states += "]";
 
-        // Create disaster JSON
+// Create disaster JSON
         std::string disaster = "{";
         disaster += "\"active\": " + std::string(state.disaster.active ? "true" : "false") + ",";
         disaster += "\"position\": [" +
                     std::to_string(state.disaster.position[0]) + "," +
-                    std::to_string(state.disaster.position[1]) + "]";
+                    std::to_string(state.disaster.position[1]) + "],";
+        // ADDED: Include disaster velocity in JSON
+        disaster += "\"velocity\": [" +
+                    std::to_string(state.disaster.velocity[0]) + "," +
+                    std::to_string(state.disaster.velocity[1]) + "]";
         disaster += "}";
-
         // Assemble final JSON
         std::string result = "{";
         result += "\"drone_states\": " + drone_states + ",";
         result += "\"disaster\": " + disaster + ",";
-        result += "\"step_count\": " + std::to_string(state.step_count);
+        result += "\"step_count\": " + std::to_string(state.step_count) + ",";
+        result += "\"disaster_undetected_steps\": " + std::to_string(state.disaster_undetected_steps);
         result += "}";
         return result;
     }
@@ -358,6 +362,11 @@ export async function render(ui_state, parameters, state, action) {
       `${state.drone_states[0].last_detected_disaster_position[1].toFixed(1)})`,
       10, 50
     );
+    // Add display of undetected steps
+    ctx.fillText(
+      `Undetected steps: ${state.disaster_undetected_steps}`,
+      10, 70
+    );
 
 
     // Display critical battery status
@@ -418,6 +427,52 @@ export async function render(ui_state, parameters, state, action) {
             ctx.fillStyle = color;
             const y = height - 60 - boxHeight + padding + i * lineHeight;
 //            ctx.fillText(`Drone ${i}: ${batteryValue}% (${modeName})`, 15, y);
+        });
+    }
+    // Draw disaster detection legend
+    if (state.drone_states && state.drone_states.length > 0) {
+        // Create a legend showing disaster detection status for each drone
+        const legendPadding = 5;
+        const legendLineHeight = 16;
+        const legendWidth = 140;
+        const legendTitle = "Disaster Detection:";
+        const legendHeight = state.drone_states.length * legendLineHeight + legendLineHeight + legendPadding * 2;
+
+        // Position the legend on the right side
+        const legendX = width - legendWidth - 10;
+        const legendY = height - 60 - legendHeight;
+
+        // Draw legend background
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.fillRect(legendX, legendY, legendWidth, legendHeight);
+        ctx.strokeStyle = '#ddd';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(legendX, legendY, legendWidth, legendHeight);
+
+        // Draw legend title
+        ctx.fillStyle = 'black';
+        ctx.font = 'bold 12px Arial';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText(legendTitle, legendX + legendPadding, legendY + legendPadding);
+
+        // Draw detection status for each drone
+        ctx.font = '12px Arial';
+        state.drone_states.forEach((drone, i) => {
+            const y = legendY + legendPadding + legendLineHeight + (i * legendLineHeight);
+
+            // Draw drone number
+            ctx.fillStyle = 'black';
+            ctx.fillText(`Drone ${i}:`, legendX + legendPadding, y);
+
+            // Draw detection status
+            if (drone.disaster_detected) {
+                ctx.fillStyle = 'green';
+                ctx.fillText('TRUE', legendX + legendPadding + 60, y);
+            } else {
+                ctx.fillStyle = 'red';
+                ctx.fillText('FALSE', legendX + legendPadding + 60, y);
+            }
         });
     }
 }

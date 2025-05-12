@@ -101,7 +101,11 @@ namespace rl_tools {
         state.disaster.active = false;
         state.disaster.position[0] = T(0);
         state.disaster.position[1] = T(0);
+        // ADDED: Initialize disaster velocity (will be set randomly when disaster spawns)
+        state.disaster.velocity[0] = T(0);
+        state.disaster.velocity[1] = T(0);
         state.step_count = 0;
+        state.disaster_undetected_steps = 0;
     }
 
     template<typename DEVICE, typename SPEC>
@@ -131,7 +135,11 @@ namespace rl_tools {
         state.disaster.active = false;
         state.disaster.position[0] = T(0);
         state.disaster.position[1] = T(0);
+        // ADDED: Initialize disaster velocity (will be set randomly when disaster spawns)
+        state.disaster.velocity[0] = T(0);
+        state.disaster.velocity[1] = T(0);
         state.step_count = 0;
+        state.disaster_undetected_steps = 0;
     }
 
     template<typename DEVICE, typename SPEC, typename RNG>
@@ -203,16 +211,26 @@ namespace rl_tools {
                     next_state.disaster.active = true;
                     next_state.disaster.position[0] = x;
                     next_state.disaster.position[1] = y;
+
+                    // ADDED: Generate random direction for disaster movement
+                    T angle = random::uniform_real_distribution(device.random, T(0), T(2) * T(M_PI), rng);
+                    next_state.disaster.velocity[0] = parameters.DISASTER_MAX_SPEED * math::cos(device.math, angle);
+                    next_state.disaster.velocity[1] = parameters.DISASTER_MAX_SPEED * math::sin(device.math, angle);
                 } else {
                     next_state.disaster.active = false;
                     next_state.disaster.position[0] = state.disaster.position[0];
                     next_state.disaster.position[1] = state.disaster.position[1];
+                    next_state.disaster.velocity[0] = state.disaster.velocity[0];
+                    next_state.disaster.velocity[1] = state.disaster.velocity[1];
                 }
             } else {
-                // Disaster remains static once created
+                // MODIFIED: Update disaster position based on velocity
                 next_state.disaster.active = true;
-                next_state.disaster.position[0] = state.disaster.position[0];
-                next_state.disaster.position[1] = state.disaster.position[1];
+                next_state.disaster.position[0] = state.disaster.position[0] + state.disaster.velocity[0] * parameters.DT;
+                next_state.disaster.position[1] = state.disaster.position[1] + state.disaster.velocity[1] * parameters.DT;
+                next_state.disaster.velocity[0] = state.disaster.velocity[0];
+                next_state.disaster.velocity[1] = state.disaster.velocity[1];
+
             }
 
             // Check for disaster detection
@@ -235,11 +253,17 @@ namespace rl_tools {
 
                 // If any drone detects, update all drones' last detected position
                 if (any_detection) {
+                    next_state.disaster_undetected_steps = 0;
+
                     for (TI j = 0; j < parameters.N_AGENTS; ++j) {
                         next_state.drone_states[j].last_detected_disaster_position[0] = next_state.disaster.position[0];
                         next_state.drone_states[j].last_detected_disaster_position[1] = next_state.disaster.position[1];
                     }
+                } else{
+                    next_state.disaster_undetected_steps = state.disaster_undetected_steps + 1;
                 }
+            } else{
+                next_state.disaster_undetected_steps = 0;
             }
         }
 
@@ -397,81 +421,173 @@ namespace rl_tools {
         using TI = typename SPEC::TI;
 
         // Count active drones
-        TI active_count = TI(0);
-        for (TI i = 0; i < parameters.N_AGENTS; ++i) {
-//            if (next_state.drone_states[i].mode != DroneMode::RECHARGING) {
-                ++active_count;
-//            }
-        }
-
-        if (active_count == 0) return T(0);
+        TI active_count = parameters.N_AGENTS;  // All drones are active in your modified code
 
         // Initialize reward
         T total_reward = T(0);
 
         // DISASTER ACTIVE MODE
         if (next_state.disaster.active) {
-            // Count detecting drones and measure distances
+            // Track individual drone detection and distances to disaster
+            std::vector<bool> detecting(active_count, false);
+            std::vector<T> distances(active_count, std::numeric_limits<T>::max());
             TI detecting_count = 0;
-            T closest_distance = std::numeric_limits<T>::max();
 
-            for (TI i = 0; i < parameters.N_AGENTS; ++i) {
+            // Calculate who's detecting and at what distance
+            for (TI i = 0; i < active_count; ++i) {
                 const auto &d = next_state.drone_states[i];
-//                if (d.mode == DroneMode::RECHARGING) continue;
 
-                // Calculate on-the-fly if this drone is detecting the disaster
+                // Calculate distance to disaster
                 T dx = d.position[0] - next_state.disaster.position[0];
                 T dy = d.position[1] - next_state.disaster.position[1];
                 T dist = magnitude(device, dx, dy);
+                distances[i] = dist;
 
                 if (dist < parameters.SENSOR_RANGE) {
+                    detecting[i] = true;
                     detecting_count++;
-                    closest_distance = std::min(closest_distance, dist);
                 }
             }
 
-            // Detection rewards
             if (detecting_count > 0) {
-                // Base reward for detection
+                // 1. Base team reward for detection
                 total_reward += T(0.5) * T(detecting_count);
 
-                // Bonus for ALL active drones detecting
+                // 2. Bonus for ALL drones detecting (swarm formation) - increased significantly
                 if (detecting_count == active_count) {
-                    total_reward += T(1.0);
+                    total_reward += T(3.0);  // Increased from 1.5 to strongly drive complete detection
+                }
+                    // Add a small penalty when detection is incomplete
+                else {
+                    // Scale penalty based on how many drones aren't detecting
+                    T missing_ratio = T(active_count - detecting_count) / T(active_count);
+                    total_reward -= T(0.5) * missing_ratio;
                 }
 
-                // Proximity bonus based on closest drone
-                T proximity_factor = T(1.0) - (closest_distance / parameters.SENSOR_RANGE);
-                total_reward += T(2.0) * proximity_factor;
-            }
-            else {
-                // Small reward for searching in high-priority areas when disaster is active
-                // But no one has detected it yet
-                const T cx = parameters.GRID_SIZE_X / T(2);
-                const T cy = parameters.GRID_SIZE_Y / T(2);
+                // 3. Individual proximity rewards with GRADIENT - stronger incentive to get closer
+                for (TI i = 0; i < active_count; ++i) {
+                    if (detecting[i]) {
+                        // Scaled proximity reward - higher reward the closer you get
+                        T norm_dist = distances[i] / parameters.SENSOR_RANGE;
+                        T proximity_factor = T(1.0) - norm_dist;
 
-                for (TI i = 0; i < parameters.N_AGENTS; ++i) {
-                    const auto &d = next_state.drone_states[i];
-//                    if (d.mode == DroneMode::RECHARGING) continue;
+                        // Quadratic scaling to more strongly reward getting closer
+                        total_reward += T(1.0) * proximity_factor * proximity_factor;
+                    }
+                }
 
-                    // Check if drone is in high-priority area
-                    T x = d.position[0], y = d.position[1];
-                    T adx = std::abs(x - cx);
-                    T ady = std::abs(y - cy);
-
-                    bool inPlat = (adx <= parameters.PLATFORM_HALF_SIZE && ady <= parameters.PLATFORM_HALF_SIZE);
-                    bool inPipeH = (ady <= parameters.PIPE_WIDTH / 2);
-                    bool inPipeV = (adx <= parameters.PIPE_WIDTH / 2);
-
-                    if (inPlat || inPipeH || inPipeV) {
-                        total_reward += T(0.1);  // Small reward for each drone in high-priority area
+                // 4. Extra reward for drones getting very close to disaster
+                for (TI i = 0; i < active_count; ++i) {
+                    if (distances[i] < parameters.SENSOR_RANGE * T(0.3)) {  // Very close
+                        total_reward += T(0.5);
                     }
                 }
             }
+
+            if (next_state.disaster_undetected_steps >= parameters.DISASTER_DETECTION_TIMEOUT) {
+                total_reward -= T(10.0);  // Heavy penalty
+            }
+
+            // Check if disaster left environment
+//            if (next_state.disaster.active) {
+            if (next_state.disaster.position[0] < 0 ||
+                next_state.disaster.position[0] >= parameters.GRID_SIZE_X ||
+                next_state.disaster.position[1] < 0 ||
+                next_state.disaster.position[1] >= parameters.GRID_SIZE_Y) {
+
+                if (detecting_count > 0) {
+                    total_reward += T(2.0);   // Small bonus for successful tracking
+                } else {
+                    total_reward -= T(5.0);   // Moderate penalty
+                }
+            }
+//            }
+
+//            else {
+//                // When disaster is active but not detected - stronger incentive to search
+//                const T cx = parameters.GRID_SIZE_X / T(2);
+//                const T cy = parameters.GRID_SIZE_Y / T(2);
+//
+//                // Track exploration coverage
+//                bool explored_regions[4] = {false, false, false, false}; // quadrants
+//
+//                for (TI i = 0; i < active_count; ++i) {
+//                    const auto &d = next_state.drone_states[i];
+//                    const auto &old_d = state.drone_states[i];
+
+
+                    // Calculate distance from last known position (or from default position)
+//                    T explore_dx = T(0), explore_dy = T(0);
+//
+//                    // If we have a known disaster position from previous detection
+//                    if (d.last_detected_disaster_position[0] > T(-1)) {
+//                        // Calculate distance to last known disaster position
+//                        T dx = d.position[0] - d.last_detected_disaster_position[0];
+//                        T dy = d.position[1] - d.last_detected_disaster_position[1];
+//                        T dist_to_last = magnitude(device, dx, dy);
+//
+//                        // Get previous distance (from state)
+//                        const auto &old_d = state.drone_states[i];
+//                        T old_dx = old_d.position[0] - old_d.last_detected_disaster_position[0];
+//                        T old_dy = old_d.position[1] - old_d.last_detected_disaster_position[1];
+//                        T old_dist_to_last = magnitude(device, old_dx, old_dy);
+//
+//                        // Reward for moving TOWARD the last known disaster position
+//                        if (dist_to_last < old_dist_to_last) {
+//                            total_reward += T(0.3);  // Higher reward for moving toward last known position
+//                        }
+//
+////                        // Additional reward for being close to the last known position
+////                        // (to encourage searching in that area)
+////                        if (dist_to_last < parameters.SENSOR_RANGE) {
+////                            total_reward += T(0.2);
+////                        }
+//                    }
+//                    else {
+//                        // Encourage movement from center if no known position
+//                        explore_dx = d.position[0] - cx;
+//                        explore_dy = d.position[1] - cy;
+//
+//                        T dist_from_center = magnitude(device, explore_dx, explore_dy);
+//
+//                        // Reward moving away from center to search when no disaster has been seen
+//                        if (dist_from_center > T(5.0)) {
+//                            total_reward += T(0.2);
+//                        }
+//                    }
+
+//                    // Track quadrant coverage
+//                    if (d.position[0] < cx && d.position[1] < cy) explored_regions[0] = true;
+//                    if (d.position[0] >= cx && d.position[1] < cy) explored_regions[1] = true;
+//                    if (d.position[0] < cx && d.position[1] >= cy) explored_regions[2] = true;
+//                    if (d.position[0] >= cx && d.position[1] >= cy) explored_regions[3] = true;
+//
+//                    // High-priority area bonus
+//                    T x = d.position[0], y = d.position[1];
+//                    T adx = std::abs(x - cx);
+//                    T ady = std::abs(y - cy);
+//
+//                    bool inPlat = (adx <= parameters.PLATFORM_HALF_SIZE && ady <= parameters.PLATFORM_HALF_SIZE);
+//                    bool inPipeH = (ady <= parameters.PIPE_WIDTH / 2);
+//                    bool inPipeV = (adx <= parameters.PIPE_WIDTH / 2);
+//
+//                    if (inPlat || inPipeH || inPipeV) {
+//                        total_reward += T(0.15);  // Increased from 0.1
+//                    }
+//                }
+//
+//                // Bonus for covering multiple quadrants
+//                TI regions_covered = 0;
+//                for (bool covered : explored_regions) {
+//                    if (covered) regions_covered++;
+//                }
+//
+//                total_reward += T(0.1) * T(regions_covered);
+//            }
         }
             // EXPLORATION MODE - no active disaster
         else {
-            // Focus on coverage of high-priority areas
+            // Focus on coverage and continuous movement
             const T cx = parameters.GRID_SIZE_X / T(2);
             const T cy = parameters.GRID_SIZE_Y / T(2);
 
@@ -482,12 +598,12 @@ namespace rl_tools {
             bool pipe_v_top_covered = false;
             bool pipe_v_bottom_covered = false;
 
-            // Calculate minimum distance between any two active drones
+            // Calculate minimum distance between any two drones
             T min_drone_distance = (active_count > 1) ? std::numeric_limits<T>::max() : T(0);
 
-            for (TI i = 0; i < parameters.N_AGENTS; ++i) {
+            for (TI i = 0; i < active_count; ++i) {
                 const auto &d = next_state.drone_states[i];
-//                if (d.mode == DroneMode::RECHARGING) continue;
+                const auto &old_d = state.drone_states[i];
 
                 // Check drone's position relative to high-priority areas
                 T x = d.position[0], y = d.position[1];
@@ -511,11 +627,20 @@ namespace rl_tools {
                     if (y > cy) pipe_v_top_covered = true;
                 }
 
-                // Check distances to other active drones for spatial distribution
+                // Calculate drone movement (encourage exploration)
+                T move_dx = d.position[0] - old_d.position[0];
+                T move_dy = d.position[1] - old_d.position[1];
+                T move_dist = magnitude(device, move_dx, move_dy);
+
+                // Reward for movement/exploration
+                if (move_dist > T(0.2)) {
+                    total_reward += T(0.05);
+                }
+
+                // Check distances to other drones for spatial distribution
                 if (active_count > 1) {
-                    for (TI j = i + 1; j < parameters.N_AGENTS; ++j) {
+                    for (TI j = i + 1; j < active_count; ++j) {
                         const auto &d2 = next_state.drone_states[j];
-//                        if (d2.mode == DroneMode::RECHARGING) continue;
 
                         T dx = d.position[0] - d2.position[0];
                         T dy = d.position[1] - d2.position[1];
@@ -539,16 +664,24 @@ namespace rl_tools {
                 T optimal_distance = parameters.SENSOR_RANGE;
                 T distance_ratio = min_drone_distance / optimal_distance;
 
-                // Reward peaks at optimal distance, decreases for too close or too far
-                if (distance_ratio > T(0.5) && distance_ratio < T(1.5)) {
-                    T distribution_reward = T(0.3) * (T(1.0) - std::abs(distance_ratio - T(1.0)));
-                    total_reward += distribution_reward;
+                // Modified distribution reward - stronger incentive to maintain optimal spacing
+                if (distance_ratio < T(0.5)) {
+                    // Too close - small penalty
+                    total_reward -= T(0.1);
+                }
+                else if (distance_ratio <= T(1.5)) {
+                    // Good range - stronger reward peak at optimal
+                    T factor = T(1.0) - std::abs(distance_ratio - T(1.0));
+                    total_reward += T(0.4) * factor;
+                }
+                else {
+                    // Too far - small reward to avoid excessive spreading
+                    total_reward += T(0.1);
                 }
             }
         }
 
         // Divide total reward by active_count to get per-drone reward
-        // This ensures the reward scales appropriately with the number of active drones
         return total_reward / T(active_count);
     }
 
@@ -628,6 +761,11 @@ namespace rl_tools {
         using T = typename SPEC::T;
         using TI = typename SPEC::TI;
 
+        // Check if disaster has been undetected for too long
+        if (state.disaster.active && state.disaster_undetected_steps >= parameters.DISASTER_DETECTION_TIMEOUT) {
+            return true;
+        }
+
         // Check for critically low battery (below 5% instead of 0%)
 //        for (TI i = 0; i < parameters.N_AGENTS; ++i) {
 //            if (state.drone_states[i].battery <= T(5)) {
@@ -636,14 +774,14 @@ namespace rl_tools {
 //        }
 
         // Check if disaster left the environment
-//        if (state.disaster.active) {
-//            if (state.disaster.position[0] < 0 ||
-//                state.disaster.position[0] >= parameters.GRID_SIZE_X ||
-//                state.disaster.position[1] < 0 ||
-//                state.disaster.position[1] >= parameters.GRID_SIZE_Y) {
-//                return true;
-//            }
-//        }
+        if (state.disaster.active) {
+            if (state.disaster.position[0] < 0 ||
+                state.disaster.position[0] >= parameters.GRID_SIZE_X ||
+                state.disaster.position[1] < 0 ||
+                state.disaster.position[1] >= parameters.GRID_SIZE_Y) {
+                return true;
+            }
+        }
 
         // Standard step‐limit check
         return state.step_count >= parameters.EPISODE_STEP_LIMIT;

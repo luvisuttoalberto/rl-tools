@@ -64,6 +64,11 @@ namespace rl_tools {
                         // Episode length
                         static constexpr TI EPISODE_STEP_LIMIT = 1000;
 
+                        static constexpr TI DISASTER_DETECTION_TIMEOUT = 200;
+
+                        // Disaster parameters
+                        static constexpr T DISASTER_MAX_SPEED = 0.5;  // ADDED: maximum disaster speed
+
                         // Battery & recharging parameters - improved values
 //                        static constexpr T RECHARGE_RATE       = 1.5;   // Increased from 1.0 (% per step at base)
 //                        static constexpr T DISCHARGE_RATE      = 0.15;  // Reduced from 0.5 (% per step in flight)
@@ -98,7 +103,10 @@ namespace rl_tools {
                     struct DisasterState {
                         bool active;
                         T position[2];
+                        T velocity[2];  // ADDED: velocity vector for moving disaster
                     };
+
+
 
                     template <typename SPEC>
                     struct State {
@@ -113,7 +121,8 @@ namespace rl_tools {
 
                         TI step_count;
 
-//                        TI disaster_undetected_steps;
+                        TI disaster_undetected_steps;
+
                     };
 
 

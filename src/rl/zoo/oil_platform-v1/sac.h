@@ -12,23 +12,23 @@ namespace rl_tools::rl::zoo::oil_platform_v1::sac {
                 : rlt::rl::algorithms::sac::loop::core::DefaultParameters<T, TI, ENVIRONMENT>
         {
 
-            static constexpr TI ACTOR_HIDDEN_DIM = 64;
-            static constexpr TI ACTOR_NUM_LAYERS = 3;
-            static constexpr auto ACTOR_ACTIVATION_FUNCTION = nn::activation_functions::ActivationFunction::FAST_TANH;
-            static constexpr TI CRITIC_HIDDEN_DIM = 128;
-            static constexpr TI CRITIC_NUM_LAYERS = 3;
-            static constexpr auto CRITIC_ACTIVATION_FUNCTION = nn::activation_functions::ActivationFunction::FAST_TANH;
+//            static constexpr TI ACTOR_HIDDEN_DIM = 64;
+//            static constexpr TI ACTOR_NUM_LAYERS = 3;
+//            static constexpr auto ACTOR_ACTIVATION_FUNCTION = nn::activation_functions::ActivationFunction::FAST_TANH;
+//            static constexpr TI CRITIC_HIDDEN_DIM = 128;
+//            static constexpr TI CRITIC_NUM_LAYERS = 3;
+//            static constexpr auto CRITIC_ACTIVATION_FUNCTION = nn::activation_functions::ActivationFunction::FAST_TANH;
 
-            struct OPTIMIZER_PARAMETERS: nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<T>{
-                static constexpr T ALPHA = 1e-3;
-            };
-            static constexpr bool NORMALIZE_OBSERVATIONS = true;
+//            struct OPTIMIZER_PARAMETERS: nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<T>{
+//                static constexpr T ALPHA = 1e-3;
+//            };
+//            static constexpr bool NORMALIZE_OBSERVATIONS = true;
 
             struct SAC_PARAMETERS
                     : rl::algorithms::sac::DefaultParameters<T, TI, ENVIRONMENT::ACTION_DIM>
             {
                 static constexpr T GAMMA = 0.98;
-                static constexpr T ACTION_ENTROPY_COEFFICIENT = 0.03; // Increased from default to encourage exploration
+//                static constexpr T ACTION_ENTROPY_COEFFICIENT = 0.03; // Increased from default to encourage exploration
                 static constexpr TI N_EPOCHS = 1;
             };
 
