@@ -32,8 +32,8 @@ namespace rl_tools::rl::zoo::oil_platform_v1::sac {
                 static constexpr TI N_EPOCHS = 1;
             };
 
-            static constexpr TI STEP_LIMIT        = 1000000;
-            static constexpr TI REPLAY_BUFFER_CAP = 1000000;
+            static constexpr TI STEP_LIMIT        = 2000000;
+            static constexpr TI REPLAY_BUFFER_CAP = 2000000;
         };
 
         using LOOP_CORE_CONFIG = rlt::rl::algorithms::sac::loop::core::Config<
@@ -44,7 +44,7 @@ namespace rl_tools::rl::zoo::oil_platform_v1::sac {
         struct LOOP_EVAL_PARAMETERS
                 : rlt::rl::loop::steps::evaluation::Parameters<T,TI,LOOP_CORE_CONFIG>
         {
-            static constexpr TI EVALUATION_INTERVAL = 100000;
+            static constexpr TI EVALUATION_INTERVAL = 200000;
         };
     };
 }

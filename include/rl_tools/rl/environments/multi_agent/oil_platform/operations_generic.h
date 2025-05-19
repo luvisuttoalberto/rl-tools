@@ -196,7 +196,7 @@ namespace rl_tools {
             const T cy = parameters.GRID_SIZE_Y / T(2);
 
             if (!state.disaster.active) {
-                if (random::uniform_real_distribution(device.random, T(0), T(1), rng) < T(0.02)) {
+                if (state.step_count >= 200 && random::uniform_real_distribution(device.random, T(0), T(1), rng) < T(0.02)) {
                     T x, y;
                     bool inHigh;
                     do {
@@ -420,24 +420,18 @@ namespace rl_tools {
         using T = typename SPEC::T;
         using TI = typename SPEC::TI;
 
-        // Count active drones
-        TI active_count = parameters.N_AGENTS;  // All drones are active in your modified code
-
-        // Initialize reward
+        TI active_count = parameters.N_AGENTS;
         T total_reward = T(0);
 
-        // DISASTER ACTIVE MODE
-        if (next_state.disaster.active) {
-            // Track individual drone detection and distances to disaster
-            std::vector<bool> detecting(active_count, false);
-            std::vector<T> distances(active_count, std::numeric_limits<T>::max());
-            TI detecting_count = 0;
+        // Check if any drone currently detects the disaster
+        TI detecting_count = 0;
+        std::vector<bool> detecting(active_count, false);
+        std::vector<T> distances(active_count, std::numeric_limits<T>::max());
+        std::vector<TI> detecting_indices;
 
-            // Calculate who's detecting and at what distance
+        if (next_state.disaster.active) {
             for (TI i = 0; i < active_count; ++i) {
                 const auto &d = next_state.drone_states[i];
-
-                // Calculate distance to disaster
                 T dx = d.position[0] - next_state.disaster.position[0];
                 T dy = d.position[1] - next_state.disaster.position[1];
                 T dist = magnitude(device, dx, dy);
@@ -446,242 +440,267 @@ namespace rl_tools {
                 if (dist < parameters.SENSOR_RANGE) {
                     detecting[i] = true;
                     detecting_count++;
+                    detecting_indices.push_back(i);
                 }
             }
+        }
 
-            if (detecting_count > 0) {
-                // 1. Base team reward for detection
-                total_reward += T(0.5) * T(detecting_count);
+        // DISASTER DETECTION MODE - when disaster is detected
+        if (detecting_count > 0) {
+            // Base reward for detection
+            total_reward += T(1.0) * T(detecting_count);
 
-                // 2. Bonus for ALL drones detecting (swarm formation) - increased significantly
-                if (detecting_count == active_count) {
-                    total_reward += T(3.0);  // Increased from 1.5 to strongly drive complete detection
-                }
-                    // Add a small penalty when detection is incomplete
-                else {
-                    // Scale penalty based on how many drones aren't detecting
-                    T missing_ratio = T(active_count - detecting_count) / T(active_count);
-                    total_reward -= T(0.5) * missing_ratio;
-                }
+            // Add the gradient improvement here:
+            // Stronger rewards for being deeper in the detection zone
+            for (TI i = 0; i < active_count; ++i) {
+                if (detecting[i]) {
+                    T norm_dist = distances[i] / parameters.SENSOR_RANGE;
 
-                // 3. Individual proximity rewards with GRADIENT - stronger incentive to get closer
-                for (TI i = 0; i < active_count; ++i) {
-                    if (detecting[i]) {
-                        // Scaled proximity reward - higher reward the closer you get
-                        T norm_dist = distances[i] / parameters.SENSOR_RANGE;
-                        T proximity_factor = T(1.0) - norm_dist;
+                    // Previous proximity calculation
+                    T proximity_factor = T(1.0) - norm_dist;
+                    // Use cubic instead of square to create steeper gradient
+                    total_reward += T(3.0) * proximity_factor * proximity_factor * proximity_factor;
 
-                        // Quadratic scaling to more strongly reward getting closer
-                        total_reward += T(1.0) * proximity_factor * proximity_factor;
-                    }
-                }
-
-                // 4. Extra reward for drones getting very close to disaster
-                for (TI i = 0; i < active_count; ++i) {
-                    if (distances[i] < parameters.SENSOR_RANGE * T(0.3)) {  // Very close
-                        total_reward += T(0.5);
+                    // Add significant bonus for being at least halfway inside the detection radius
+                    if (norm_dist < 0.5) {
+                        total_reward += T(1.5);
                     }
                 }
             }
 
-            if (next_state.disaster_undetected_steps >= parameters.DISASTER_DETECTION_TIMEOUT) {
-                total_reward -= T(10.0);  // Heavy penalty
+            // Strong bonus for complete swarm detection
+            if (detecting_count == active_count) {
+                total_reward += T(5.0);
+            } else {
+                T missing_ratio = T(active_count - detecting_count) / T(active_count);
+                total_reward -= T(1.0) * missing_ratio;
             }
 
-            // Check if disaster left environment
-//            if (next_state.disaster.active) {
+            // Proximity rewards
+            for (TI i = 0; i < active_count; ++i) {
+                if (detecting[i]) {
+                    T norm_dist = distances[i] / parameters.SENSOR_RANGE;
+                    T proximity_factor = T(1.0) - norm_dist;
+                    total_reward += T(2.0) * proximity_factor * proximity_factor;
+                }
+            }
+
+            // Very close bonus
+            for (TI i = 0; i < active_count; ++i) {
+                if (distances[i] < parameters.SENSOR_RANGE * T(0.3)) {
+                    total_reward += T(1.0);
+                }
+            }
+
+            // ADDED: Formation reward for 360-degree coverage
+            if (detecting_count >= 2) {
+                T formation_reward = T(0);
+
+                // Calculate angles of detecting drones relative to disaster
+                std::vector<T> angles;
+                for (TI idx : detecting_indices) {
+                    const auto &d = next_state.drone_states[idx];
+                    T dx = d.position[0] - next_state.disaster.position[0];
+                    T dy = d.position[1] - next_state.disaster.position[1];
+                    T angle = math::atan2(device.math, dy, dx);
+                    // Normalize angle to [0, 2π)
+                    if (angle < T(0)) {
+                        angle += T(2) * T(M_PI);
+                    }
+                    angles.push_back(angle);
+                }
+
+                // Sort angles for better analysis
+                std::sort(angles.begin(), angles.end());
+
+                // Calculate angular separation between consecutive drones
+                T ideal_separation = T(2) * T(M_PI) / T(detecting_count);
+                T total_angle_error = T(0);
+
+                for (size_t i = 0; i < angles.size(); ++i) {
+                    size_t next_i = (i + 1) % angles.size();
+                    T actual_separation = angles[next_i] - angles[i];
+
+                    // Handle wraparound for the last drone
+                    if (next_i == 0) {
+                        actual_separation = (T(2) * T(M_PI) - angles[i]) + angles[0];
+                    }
+
+                    // Calculate error from ideal separation
+                    T error = std::abs(actual_separation - ideal_separation);
+                    total_angle_error += error;
+                }
+
+                // Reward for good angular distribution (lower error = higher reward)
+                T max_error = T(2) * T(M_PI);  // Maximum possible error
+                T normalized_error = total_angle_error / max_error;
+                formation_reward = T(3.0) * (T(1.0) - normalized_error);
+
+                // Additional reward for maintaining optimal distance while in formation
+                T distance_consistency_reward = T(0);
+                if (detecting_count >= 2) {
+                    T ideal_radius = parameters.SENSOR_RANGE * T(0.75);  // Optimal monitoring distance
+                    T distance_variance = T(0);
+
+                    for (TI idx : detecting_indices) {
+                        T deviation = std::abs(distances[idx] - ideal_radius);
+                        distance_variance += deviation;
+                    }
+
+                    T avg_deviation = distance_variance / T(detecting_count);
+                    T max_deviation = parameters.SENSOR_RANGE;
+                    T normalized_deviation = avg_deviation / max_deviation;
+                    distance_consistency_reward = T(1.5) * (T(1.0) - normalized_deviation);
+                }
+
+                total_reward += formation_reward + distance_consistency_reward;
+            }
+        }
+            // EXPLORATION MODE - no disaster detected (regardless of disaster.active)
+        else {
+            const T cx = parameters.GRID_SIZE_X / T(2);
+            const T cy = parameters.GRID_SIZE_Y / T(2);
+
+            // Check if disaster has been detected before (shared knowledge)
+            bool disaster_previously_detected = false;
+            if (active_count > 0) {
+                disaster_previously_detected = (next_state.drone_states[0].last_detected_disaster_position[0] > T(-1));
+            }
+
+            if (disaster_previously_detected && next_state.disaster.active) {
+                // CASE: Disaster active but not currently detected, was detected before
+                // Encourage moving toward last known position and forming search pattern
+                T total_approach_reward = T(0);
+
+                // Calculate center of mass around last known position
+                T last_pos_x = next_state.drone_states[0].last_detected_disaster_position[0];
+                T last_pos_y = next_state.drone_states[0].last_detected_disaster_position[1];
+
+                for (TI i = 0; i < active_count; ++i) {
+                    const auto &d = next_state.drone_states[i];
+                    const auto &old_d = state.drone_states[i];
+
+                    T current_dist = magnitude(device,
+                                               d.position[0] - last_pos_x,
+                                               d.position[1] - last_pos_y);
+
+                    T old_dist = magnitude(device,
+                                           old_d.position[0] - last_pos_x,
+                                           old_d.position[1] - last_pos_y);
+
+                    // Reward for moving toward last known position
+                    if (current_dist < old_dist) {
+                        total_approach_reward += T(0.8);
+                    }
+
+                    // Reward for being spread around the last known position (search formation)
+                    for (TI j = i + 1; j < active_count; ++j) {
+                        T drone_distance = magnitude(device,
+                                                     d.position[0] - next_state.drone_states[j].position[0],
+                                                     d.position[1] - next_state.drone_states[j].position[1]);
+
+                        if (drone_distance >= parameters.SENSOR_RANGE * T(0.8) &&
+                            drone_distance <= parameters.SENSOR_RANGE * T(1.5)) {
+                            total_approach_reward += T(0.3);
+                        }
+                    }
+                }
+
+                total_reward += total_approach_reward;
+            } else {
+                // CASE: No disaster detected and never detected, OR disaster not active
+                // General exploration rewards (increased values)
+
+                // Zone coverage (increased rewards)
+                bool platform_covered = false;
+                bool pipe_h_left_covered = false;
+                bool pipe_h_right_covered = false;
+                bool pipe_v_top_covered = false;
+                bool pipe_v_bottom_covered = false;
+
+                T min_drone_distance = (active_count > 1) ? std::numeric_limits<T>::max() : T(0);
+
+                for (TI i = 0; i < active_count; ++i) {
+                    const auto &d = next_state.drone_states[i];
+                    const auto &old_d = state.drone_states[i];
+
+                    T x = d.position[0], y = d.position[1];
+                    T adx = std::abs(x - cx);
+                    T ady = std::abs(y - cy);
+
+                    // Check coverage areas
+                    if (adx <= parameters.PLATFORM_HALF_SIZE && ady <= parameters.PLATFORM_HALF_SIZE) {
+                        platform_covered = true;
+                    }
+                    if (ady <= parameters.PIPE_WIDTH / 2) {
+                        if (x < cx) pipe_h_left_covered = true;
+                        if (x > cx) pipe_h_right_covered = true;
+                    }
+                    if (adx <= parameters.PIPE_WIDTH / 2) {
+                        if (y < cy) pipe_v_bottom_covered = true;
+                        if (y > cy) pipe_v_top_covered = true;
+                    }
+
+                    // Movement reward (increased)
+                    T move_dist = magnitude(device,
+                                            d.position[0] - old_d.position[0],
+                                            d.position[1] - old_d.position[1]);
+                    if (move_dist > T(0.2)) {
+                        total_reward += T(0.3);  // Increased from 0.05
+                    }
+
+                    // Distance calculations for separation
+                    for (TI j = i + 1; j < active_count; ++j) {
+                        T dist = magnitude(device,
+                                           d.position[0] - next_state.drone_states[j].position[0],
+                                           d.position[1] - next_state.drone_states[j].position[1]);
+                        min_drone_distance = std::min(min_drone_distance, dist);
+                    }
+                }
+
+                // Coverage rewards (increased)
+                if (platform_covered) total_reward += T(0.8);  // Increased from 0.3
+                if (pipe_h_left_covered) total_reward += T(0.6);  // Increased from 0.2
+                if (pipe_h_right_covered) total_reward += T(0.6);
+                if (pipe_v_top_covered) total_reward += T(0.6);
+                if (pipe_v_bottom_covered) total_reward += T(0.6);
+
+                // Separation rewards (increased)
+                if (active_count > 1) {
+                    T optimal_distance = parameters.SENSOR_RANGE;
+                    T distance_ratio = min_drone_distance / optimal_distance;
+
+                    if (distance_ratio < T(0.5)) {
+                        total_reward -= T(0.3);  // Increased penalty
+                    } else if (distance_ratio <= T(1.5)) {
+                        T factor = T(1.0) - std::abs(distance_ratio - T(1.0));
+                        total_reward += T(1.0) * factor;  // Increased from 0.4
+                    } else {
+                        total_reward += T(0.3);  // Increased from 0.1
+                    }
+                }
+            }
+        }
+
+        // Termination penalties (consistent with before)
+        if (next_state.disaster.active && next_state.disaster_undetected_steps >= parameters.DISASTER_DETECTION_TIMEOUT) {
+            total_reward -= T(10.0);
+        }
+
+        if (next_state.disaster.active) {
             if (next_state.disaster.position[0] < 0 ||
                 next_state.disaster.position[0] >= parameters.GRID_SIZE_X ||
                 next_state.disaster.position[1] < 0 ||
                 next_state.disaster.position[1] >= parameters.GRID_SIZE_Y) {
 
                 if (detecting_count > 0) {
-                    total_reward += T(2.0);   // Small bonus for successful tracking
+                    total_reward += T(2.0);
                 } else {
-                    total_reward -= T(5.0);   // Moderate penalty
-                }
-            }
-//            }
-
-//            else {
-//                // When disaster is active but not detected - stronger incentive to search
-//                const T cx = parameters.GRID_SIZE_X / T(2);
-//                const T cy = parameters.GRID_SIZE_Y / T(2);
-//
-//                // Track exploration coverage
-//                bool explored_regions[4] = {false, false, false, false}; // quadrants
-//
-//                for (TI i = 0; i < active_count; ++i) {
-//                    const auto &d = next_state.drone_states[i];
-//                    const auto &old_d = state.drone_states[i];
-
-
-                    // Calculate distance from last known position (or from default position)
-//                    T explore_dx = T(0), explore_dy = T(0);
-//
-//                    // If we have a known disaster position from previous detection
-//                    if (d.last_detected_disaster_position[0] > T(-1)) {
-//                        // Calculate distance to last known disaster position
-//                        T dx = d.position[0] - d.last_detected_disaster_position[0];
-//                        T dy = d.position[1] - d.last_detected_disaster_position[1];
-//                        T dist_to_last = magnitude(device, dx, dy);
-//
-//                        // Get previous distance (from state)
-//                        const auto &old_d = state.drone_states[i];
-//                        T old_dx = old_d.position[0] - old_d.last_detected_disaster_position[0];
-//                        T old_dy = old_d.position[1] - old_d.last_detected_disaster_position[1];
-//                        T old_dist_to_last = magnitude(device, old_dx, old_dy);
-//
-//                        // Reward for moving TOWARD the last known disaster position
-//                        if (dist_to_last < old_dist_to_last) {
-//                            total_reward += T(0.3);  // Higher reward for moving toward last known position
-//                        }
-//
-////                        // Additional reward for being close to the last known position
-////                        // (to encourage searching in that area)
-////                        if (dist_to_last < parameters.SENSOR_RANGE) {
-////                            total_reward += T(0.2);
-////                        }
-//                    }
-//                    else {
-//                        // Encourage movement from center if no known position
-//                        explore_dx = d.position[0] - cx;
-//                        explore_dy = d.position[1] - cy;
-//
-//                        T dist_from_center = magnitude(device, explore_dx, explore_dy);
-//
-//                        // Reward moving away from center to search when no disaster has been seen
-//                        if (dist_from_center > T(5.0)) {
-//                            total_reward += T(0.2);
-//                        }
-//                    }
-
-//                    // Track quadrant coverage
-//                    if (d.position[0] < cx && d.position[1] < cy) explored_regions[0] = true;
-//                    if (d.position[0] >= cx && d.position[1] < cy) explored_regions[1] = true;
-//                    if (d.position[0] < cx && d.position[1] >= cy) explored_regions[2] = true;
-//                    if (d.position[0] >= cx && d.position[1] >= cy) explored_regions[3] = true;
-//
-//                    // High-priority area bonus
-//                    T x = d.position[0], y = d.position[1];
-//                    T adx = std::abs(x - cx);
-//                    T ady = std::abs(y - cy);
-//
-//                    bool inPlat = (adx <= parameters.PLATFORM_HALF_SIZE && ady <= parameters.PLATFORM_HALF_SIZE);
-//                    bool inPipeH = (ady <= parameters.PIPE_WIDTH / 2);
-//                    bool inPipeV = (adx <= parameters.PIPE_WIDTH / 2);
-//
-//                    if (inPlat || inPipeH || inPipeV) {
-//                        total_reward += T(0.15);  // Increased from 0.1
-//                    }
-//                }
-//
-//                // Bonus for covering multiple quadrants
-//                TI regions_covered = 0;
-//                for (bool covered : explored_regions) {
-//                    if (covered) regions_covered++;
-//                }
-//
-//                total_reward += T(0.1) * T(regions_covered);
-//            }
-        }
-            // EXPLORATION MODE - no active disaster
-        else {
-            // Focus on coverage and continuous movement
-            const T cx = parameters.GRID_SIZE_X / T(2);
-            const T cy = parameters.GRID_SIZE_Y / T(2);
-
-            // Track area coverage
-            bool platform_covered = false;
-            bool pipe_h_left_covered = false;
-            bool pipe_h_right_covered = false;
-            bool pipe_v_top_covered = false;
-            bool pipe_v_bottom_covered = false;
-
-            // Calculate minimum distance between any two drones
-            T min_drone_distance = (active_count > 1) ? std::numeric_limits<T>::max() : T(0);
-
-            for (TI i = 0; i < active_count; ++i) {
-                const auto &d = next_state.drone_states[i];
-                const auto &old_d = state.drone_states[i];
-
-                // Check drone's position relative to high-priority areas
-                T x = d.position[0], y = d.position[1];
-                T adx = std::abs(x - cx);
-                T ady = std::abs(y - cy);
-
-                // Platform coverage
-                if (adx <= parameters.PLATFORM_HALF_SIZE && ady <= parameters.PLATFORM_HALF_SIZE) {
-                    platform_covered = true;
-                }
-
-                // Horizontal pipe coverage - split into left and right sections
-                if (ady <= parameters.PIPE_WIDTH / 2) {
-                    if (x < cx) pipe_h_left_covered = true;
-                    if (x > cx) pipe_h_right_covered = true;
-                }
-
-                // Vertical pipe coverage - split into top and bottom sections
-                if (adx <= parameters.PIPE_WIDTH / 2) {
-                    if (y < cy) pipe_v_bottom_covered = true;
-                    if (y > cy) pipe_v_top_covered = true;
-                }
-
-                // Calculate drone movement (encourage exploration)
-                T move_dx = d.position[0] - old_d.position[0];
-                T move_dy = d.position[1] - old_d.position[1];
-                T move_dist = magnitude(device, move_dx, move_dy);
-
-                // Reward for movement/exploration
-                if (move_dist > T(0.2)) {
-                    total_reward += T(0.05);
-                }
-
-                // Check distances to other drones for spatial distribution
-                if (active_count > 1) {
-                    for (TI j = i + 1; j < active_count; ++j) {
-                        const auto &d2 = next_state.drone_states[j];
-
-                        T dx = d.position[0] - d2.position[0];
-                        T dy = d.position[1] - d2.position[1];
-                        T dist = magnitude(device, dx, dy);
-
-                        min_drone_distance = std::min(min_drone_distance, dist);
-                    }
-                }
-            }
-
-            // Reward for coverage - each area contributes individually
-            if (platform_covered) total_reward += T(0.3);
-            if (pipe_h_left_covered) total_reward += T(0.2);
-            if (pipe_h_right_covered) total_reward += T(0.2);
-            if (pipe_v_top_covered) total_reward += T(0.2);
-            if (pipe_v_bottom_covered) total_reward += T(0.2);
-
-            // Reward for spatial distribution (if multiple active drones)
-            if (active_count > 1) {
-                // Optimal separation is around sensor range
-                T optimal_distance = parameters.SENSOR_RANGE;
-                T distance_ratio = min_drone_distance / optimal_distance;
-
-                // Modified distribution reward - stronger incentive to maintain optimal spacing
-                if (distance_ratio < T(0.5)) {
-                    // Too close - small penalty
-                    total_reward -= T(0.1);
-                }
-                else if (distance_ratio <= T(1.5)) {
-                    // Good range - stronger reward peak at optimal
-                    T factor = T(1.0) - std::abs(distance_ratio - T(1.0));
-                    total_reward += T(0.4) * factor;
-                }
-                else {
-                    // Too far - small reward to avoid excessive spreading
-                    total_reward += T(0.1);
+                    total_reward -= T(5.0);
                 }
             }
         }
 
-        // Divide total reward by active_count to get per-drone reward
         return total_reward / T(active_count);
     }
 

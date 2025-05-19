@@ -30,7 +30,7 @@ namespace rl_tools {
                         using TI = T_TI;
                         // Number of drones total and deployed
                         static constexpr TI N_AGENTS           = 3;
-                        static constexpr TI ACTIVE_DRONES      = 3;
+//                        static constexpr TI ACTIVE_DRONES      = 3;
 
                         // Sensing & motion
                         static constexpr T SENSOR_RANGE        = 5.0;
@@ -43,21 +43,21 @@ namespace rl_tools {
                         // Pipes extending from platform, width
                         static constexpr T PIPE_WIDTH          = 2.0;  // Increased from 1.0 for better visibility
 
-                        static constexpr T EXPLORATION_BONUS   = 0.05;
-                        static constexpr T HIGH_PRIORITY_BONUS = 1.0f;
-
-                        // how many steps before a cell "ages out"
-                        static constexpr TI REVISIT_THRESHOLD  = 300;
-
-                        // small bonus for every non-priority cell
-                        static constexpr T GENERAL_AREA_BONUS  = 0.01f;
-
-                        // scales the proximity reward when disaster is active
-                        static constexpr T DISASTER_PRIORITY   = 8.0f;
+//                        static constexpr T EXPLORATION_BONUS   = 0.05;
+//                        static constexpr T HIGH_PRIORITY_BONUS = 1.0f;
+//
+//                        // how many steps before a cell "ages out"
+//                        static constexpr TI REVISIT_THRESHOLD  = 300;
+//
+//                        // small bonus for every non-priority cell
+//                        static constexpr T GENERAL_AREA_BONUS  = 0.01f;
+//
+//                        // scales the proximity reward when disaster is active
+//                        static constexpr T DISASTER_PRIORITY   = 8.0f;
 
 
                         // Grid discretization
-                        static constexpr T GRID_CELL_SIZE      = 1.0;
+//                        static constexpr T GRID_CELL_SIZE      = 1.0;
                         static constexpr TI GRID_SIZE_X        = 20;
                         static constexpr TI GRID_SIZE_Y        = 20;
 
@@ -72,12 +72,12 @@ namespace rl_tools {
                         // Battery & recharging parameters - improved values
 //                        static constexpr T RECHARGE_RATE       = 1.5;   // Increased from 1.0 (% per step at base)
 //                        static constexpr T DISCHARGE_RATE      = 0.15;  // Reduced from 0.5 (% per step in flight)
-                        static constexpr TI FULLY_CHARGED_STEPS = 3;    // Reduced from 5 (steps at 100% before swap)
+//                        static constexpr TI FULLY_CHARGED_STEPS = 3;    // Reduced from 5 (steps at 100% before swap)
 
                         // Grace period before disaster detection penalty
-                        static constexpr TI DISASTER_DETECTION_GRACE_PERIOD = 30;
-
-                        static constexpr T CRITICAL_BATTERY_PENALTY = 2.0f;  // Reduced from 3.0
+//                        static constexpr TI DISASTER_DETECTION_GRACE_PERIOD = 30;
+//
+//                        static constexpr T CRITICAL_BATTERY_PENALTY = 2.0f;  // Reduced from 3.0
                     };
 
                     template <typename T_PARAMETERS>
