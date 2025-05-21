@@ -473,7 +473,7 @@ namespace rl_tools {
                 total_reward += T(5.0);
             } else {
                 T missing_ratio = T(active_count - detecting_count) / T(active_count);
-                total_reward -= T(1.0) * missing_ratio;
+                total_reward -= T(3.0) * missing_ratio;
             }
 
             // Proximity rewards
@@ -608,77 +608,186 @@ namespace rl_tools {
 
                 total_reward += total_approach_reward;
             } else {
-                // CASE: No disaster detected and never detected, OR disaster not active
-                // General exploration rewards (increased values)
+// CASE: No disaster detected and never detected, OR disaster not active
+// Modified exploration reward based on FOV coverage of high-priority areas
 
-                // Zone coverage (increased rewards)
-                bool platform_covered = false;
-                bool pipe_h_left_covered = false;
-                bool pipe_h_right_covered = false;
-                bool pipe_v_top_covered = false;
-                bool pipe_v_bottom_covered = false;
+                const T cx = parameters.GRID_SIZE_X / T(2);
+                const T cy = parameters.GRID_SIZE_Y / T(2);
 
-                T min_drone_distance = (active_count > 1) ? std::numeric_limits<T>::max() : T(0);
+// Define high-priority areas with their boundaries
+// Platform center
+                T platform_min_x = cx - parameters.PLATFORM_HALF_SIZE;
+                T platform_max_x = cx + parameters.PLATFORM_HALF_SIZE;
+                T platform_min_y = cy - parameters.PLATFORM_HALF_SIZE;
+                T platform_max_y = cy + parameters.PLATFORM_HALF_SIZE;
 
+// Horizontal pipes
+                T pipe_h_min_y = cy - parameters.PIPE_WIDTH / T(2);
+                T pipe_h_max_y = cy + parameters.PIPE_WIDTH / T(2);
+// Vertical pipes
+                T pipe_v_min_x = cx - parameters.PIPE_WIDTH / T(2);
+                T pipe_v_max_x = cx + parameters.PIPE_WIDTH / T(2);
+
+// Create a grid to track which cells are covered by any drone's FOV
+                const TI grid_resolution = 20; // Higher number = more accurate but more computation
+                const T cell_size_x = T(parameters.GRID_SIZE_X) / T(grid_resolution);
+                const T cell_size_y = T(parameters.GRID_SIZE_Y) / T(grid_resolution);
+
+// Initialize counters for covered cells in each priority area
+                TI platform_total_cells = 0;
+                TI platform_covered_cells = 0;
+                TI pipe_h_left_total_cells = 0;
+                TI pipe_h_left_covered_cells = 0;
+                TI pipe_h_right_total_cells = 0;
+                TI pipe_h_right_covered_cells = 0;
+                TI pipe_v_top_total_cells = 0;
+                TI pipe_v_top_covered_cells = 0;
+                TI pipe_v_bottom_total_cells = 0;
+                TI pipe_v_bottom_covered_cells = 0;
+
+// Create a grid to track which cells are covered by FOV
+                std::vector<std::vector<bool>> covered_grid(grid_resolution, std::vector<bool>(grid_resolution, false));
+
+// Mark cells covered by any drone's FOV
                 for (TI i = 0; i < active_count; ++i) {
                     const auto &d = next_state.drone_states[i];
-                    const auto &old_d = state.drone_states[i];
+                    T drone_x = d.position[0];
+                    T drone_y = d.position[1];
 
-                    T x = d.position[0], y = d.position[1];
-                    T adx = std::abs(x - cx);
-                    T ady = std::abs(y - cy);
+                    // Check all grid cells within the sensor range
+                    for (TI cell_x = 0; cell_x < grid_resolution; ++cell_x) {
+                        for (TI cell_y = 0; cell_y < grid_resolution; ++cell_y) {
+                            // Calculate the center of this cell
+                            T cell_center_x = cell_size_x * (T(cell_x) + T(0.5));
+                            T cell_center_y = cell_size_y * (T(cell_y) + T(0.5));
 
-                    // Check coverage areas
-                    if (adx <= parameters.PLATFORM_HALF_SIZE && ady <= parameters.PLATFORM_HALF_SIZE) {
-                        platform_covered = true;
-                    }
-                    if (ady <= parameters.PIPE_WIDTH / 2) {
-                        if (x < cx) pipe_h_left_covered = true;
-                        if (x > cx) pipe_h_right_covered = true;
-                    }
-                    if (adx <= parameters.PIPE_WIDTH / 2) {
-                        if (y < cy) pipe_v_bottom_covered = true;
-                        if (y > cy) pipe_v_top_covered = true;
-                    }
+                            // Check if this cell is within the drone's FOV
+                            T dist = magnitude(device,
+                                               cell_center_x - drone_x,
+                                               cell_center_y - drone_y);
 
-                    // Movement reward (increased)
-                    T move_dist = magnitude(device,
-                                            d.position[0] - old_d.position[0],
-                                            d.position[1] - old_d.position[1]);
-                    if (move_dist > T(0.2)) {
-                        total_reward += T(0.3);  // Increased from 0.05
-                    }
-
-                    // Distance calculations for separation
-                    for (TI j = i + 1; j < active_count; ++j) {
-                        T dist = magnitude(device,
-                                           d.position[0] - next_state.drone_states[j].position[0],
-                                           d.position[1] - next_state.drone_states[j].position[1]);
-                        min_drone_distance = std::min(min_drone_distance, dist);
+                            if (dist < parameters.SENSOR_RANGE) {
+                                covered_grid[cell_x][cell_y] = true;
+                            }
+                        }
                     }
                 }
 
-                // Coverage rewards (increased)
-                if (platform_covered) total_reward += T(0.8);  // Increased from 0.3
-                if (pipe_h_left_covered) total_reward += T(0.6);  // Increased from 0.2
-                if (pipe_h_right_covered) total_reward += T(0.6);
-                if (pipe_v_top_covered) total_reward += T(0.6);
-                if (pipe_v_bottom_covered) total_reward += T(0.6);
+// Count covered cells in each priority area
+                for (TI cell_x = 0; cell_x < grid_resolution; ++cell_x) {
+                    for (TI cell_y = 0; cell_y < grid_resolution; ++cell_y) {
+                        // Calculate the center of this cell
+                        T cell_center_x = cell_size_x * (T(cell_x) + T(0.5));
+                        T cell_center_y = cell_size_y * (T(cell_y) + T(0.5));
 
-                // Separation rewards (increased)
-                if (active_count > 1) {
-                    T optimal_distance = parameters.SENSOR_RANGE;
-                    T distance_ratio = min_drone_distance / optimal_distance;
+                        // Check which priority area this cell belongs to
+                        bool in_platform = (cell_center_x >= platform_min_x && cell_center_x <= platform_max_x &&
+                                            cell_center_y >= platform_min_y && cell_center_y <= platform_max_y);
 
-                    if (distance_ratio < T(0.5)) {
-                        total_reward -= T(0.3);  // Increased penalty
-                    } else if (distance_ratio <= T(1.5)) {
-                        T factor = T(1.0) - std::abs(distance_ratio - T(1.0));
-                        total_reward += T(1.0) * factor;  // Increased from 0.4
-                    } else {
-                        total_reward += T(0.3);  // Increased from 0.1
+                        bool in_pipe_h = (cell_center_y >= pipe_h_min_y && cell_center_y <= pipe_h_max_y);
+                        bool in_pipe_h_left = in_pipe_h && (cell_center_x < cx);
+                        bool in_pipe_h_right = in_pipe_h && (cell_center_x > cx);
+
+                        bool in_pipe_v = (cell_center_x >= pipe_v_min_x && cell_center_x <= pipe_v_max_x);
+                        bool in_pipe_v_top = in_pipe_v && (cell_center_y > cy);
+                        bool in_pipe_v_bottom = in_pipe_v && (cell_center_y < cy);
+
+                        // Update counters based on coverage
+                        if (in_platform) {
+                            platform_total_cells++;
+                            if (covered_grid[cell_x][cell_y]) platform_covered_cells++;
+                        }
+
+                        if (in_pipe_h_left) {
+                            pipe_h_left_total_cells++;
+                            if (covered_grid[cell_x][cell_y]) pipe_h_left_covered_cells++;
+                        }
+
+                        if (in_pipe_h_right) {
+                            pipe_h_right_total_cells++;
+                            if (covered_grid[cell_x][cell_y]) pipe_h_right_covered_cells++;
+                        }
+
+                        if (in_pipe_v_top) {
+                            pipe_v_top_total_cells++;
+                            if (covered_grid[cell_x][cell_y]) pipe_v_top_covered_cells++;
+                        }
+
+                        if (in_pipe_v_bottom) {
+                            pipe_v_bottom_total_cells++;
+                            if (covered_grid[cell_x][cell_y]) pipe_v_bottom_covered_cells++;
+                        }
                     }
                 }
+
+// Calculate coverage ratios for each area
+                T platform_coverage = (platform_total_cells > 0) ?
+                                      T(platform_covered_cells) / T(platform_total_cells) : T(0);
+                T pipe_h_left_coverage = (pipe_h_left_total_cells > 0) ?
+                                         T(pipe_h_left_covered_cells) / T(pipe_h_left_total_cells) : T(0);
+                T pipe_h_right_coverage = (pipe_h_right_total_cells > 0) ?
+                                          T(pipe_h_right_covered_cells) / T(pipe_h_right_total_cells) : T(0);
+                T pipe_v_top_coverage = (pipe_v_top_total_cells > 0) ?
+                                        T(pipe_v_top_covered_cells) / T(pipe_v_top_total_cells) : T(0);
+                T pipe_v_bottom_coverage = (pipe_v_bottom_total_cells > 0) ?
+                                           T(pipe_v_bottom_covered_cells) / T(pipe_v_bottom_total_cells) : T(0);
+
+// Calculate total priority area coverage
+                TI total_priority_cells = platform_total_cells + pipe_h_left_total_cells +
+                                          pipe_h_right_total_cells + pipe_v_top_total_cells +
+                                          pipe_v_bottom_total_cells;
+
+                TI total_covered_cells = platform_covered_cells + pipe_h_left_covered_cells +
+                                         pipe_h_right_covered_cells + pipe_v_top_covered_cells +
+                                         pipe_v_bottom_covered_cells;
+
+                T overall_coverage = (total_priority_cells > 0) ?
+                                     T(total_covered_cells) / T(total_priority_cells) : T(0);
+
+// Assign rewards based on coverage ratios
+                total_reward += T(3.0) * overall_coverage;  // Overall coverage reward
+
+// Additional rewards for individual areas
+                total_reward += T(0.8) * platform_coverage;     // Platform is most important
+                total_reward += T(0.6) * pipe_h_left_coverage;  // Pipe sections each get 0.6
+                total_reward += T(0.6) * pipe_h_right_coverage;
+                total_reward += T(0.6) * pipe_v_top_coverage;
+                total_reward += T(0.6) * pipe_v_bottom_coverage;
+
+// Separation rewards (to ensure drones are well-distributed)
+//                T min_drone_distance = (active_count > 1) ? std::numeric_limits<T>::max() : T(0);
+//                for (TI i = 0; i < active_count; ++i) {
+//                    const auto &d = next_state.drone_states[i];
+//
+//                    // Movement reward (encourage exploration)
+//                    const auto &old_d = state.drone_states[i];
+//                    T move_dist = magnitude(device,
+//                                            d.position[0] - old_d.position[0],
+//                                            d.position[1] - old_d.position[1]);
+//                    if (move_dist > T(0.2)) {
+//                        total_reward += T(0.3);
+//                    }
+//
+//                    // Distance calculations for separation
+//                    for (TI j = i + 1; j < active_count; ++j) {
+//                        T dist = magnitude(device,
+//                                           d.position[0] - next_state.drone_states[j].position[0],
+//                                           d.position[1] - next_state.drone_states[j].position[1]);
+//                        min_drone_distance = std::min(min_drone_distance, dist);
+//                    }
+//                }
+//
+//// Modified separation reward (only penalize being too close)
+//                if (active_count > 1) {
+//                    T min_safe_distance = parameters.SENSOR_RANGE * T(0.7);  // Minimum separation to avoid excessive overlap
+//
+//                    if (min_drone_distance < min_safe_distance) {
+//                        // Penalty for being too close (increases as they get closer)
+//                        T closeness_ratio = min_drone_distance / min_safe_distance;
+//                        total_reward -= T(1.0) * (T(1.0) - closeness_ratio);
+//                    }
+//                    // Remove the rewards for being at "optimal" distance or far apart
+//                }
             }
         }
 
