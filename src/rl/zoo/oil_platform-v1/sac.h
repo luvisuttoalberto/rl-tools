@@ -14,15 +14,38 @@ namespace rl_tools::rl::zoo::oil_platform_v1::sac {
 
 //            static constexpr TI ACTOR_HIDDEN_DIM = 64;
 //            static constexpr TI ACTOR_NUM_LAYERS = 3;
-//            static constexpr auto ACTOR_ACTIVATION_FUNCTION = nn::activation_functions::ActivationFunction::FAST_TANH;
+            static constexpr auto ACTOR_ACTIVATION_FUNCTION = nn::activation_functions::ActivationFunction::FAST_TANH;
 //            static constexpr TI CRITIC_HIDDEN_DIM = 128;
 //            static constexpr TI CRITIC_NUM_LAYERS = 3;
-//            static constexpr auto CRITIC_ACTIVATION_FUNCTION = nn::activation_functions::ActivationFunction::FAST_TANH;
+            static constexpr auto CRITIC_ACTIVATION_FUNCTION = nn::activation_functions::ActivationFunction::FAST_TANH;
+
 
 //            struct OPTIMIZER_PARAMETERS: nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<T>{
 //                static constexpr T ALPHA = 1e-3;
 //            };
-//            static constexpr bool NORMALIZE_OBSERVATIONS = true;
+//
+//            struct ACTOR_OPTIMIZER_PARAMETERS: nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<T>{
+//                static constexpr T ALPHA = 3e-4;
+//                static constexpr bool ENABLE_GRADIENT_CLIPPING = true;
+//                static constexpr T GRADIENT_CLIP_VALUE = 5.0;
+//            };
+//
+//            struct CRITIC_OPTIMIZER_PARAMETERS: nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<T>{
+//                static constexpr T ALPHA = 3e-4;
+//                static constexpr bool ENABLE_GRADIENT_CLIPPING = true;
+//                static constexpr T GRADIENT_CLIP_VALUE = 5.0;
+//            };
+//
+//            struct ALPHA_OPTIMIZER_PARAMETERS: nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<T>{
+//                static constexpr T ALPHA = 3e-4;
+//                static constexpr bool ENABLE_GRADIENT_CLIPPING = true;
+//                static constexpr T GRADIENT_CLIP_VALUE = 1.0;
+//            };
+//
+//            // Increase warmup steps
+//            static constexpr TI N_WARMUP_STEPS = 10000;
+//            static constexpr TI N_WARMUP_STEPS_CRITIC = 10000;
+//            static constexpr TI N_WARMUP_STEPS_ACTOR = 10000;
 
             struct SAC_PARAMETERS
                     : rl::algorithms::sac::DefaultParameters<T, TI, ENVIRONMENT::ACTION_DIM>

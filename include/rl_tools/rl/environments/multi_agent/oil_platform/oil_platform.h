@@ -29,7 +29,7 @@ namespace rl_tools {
                         using T = T_T;
                         using TI = T_TI;
                         // Number of drones total and deployed
-                        static constexpr TI N_AGENTS           = 3;
+                        static constexpr TI N_AGENTS           = 5;
 //                        static constexpr TI ACTIVE_DRONES      = 3;
 
                         // Sensing & motion
@@ -64,20 +64,18 @@ namespace rl_tools {
                         // Episode length
                         static constexpr TI EPISODE_STEP_LIMIT = 1000;
 
-                        static constexpr TI DISASTER_DETECTION_TIMEOUT = 200;
+                        static constexpr TI DISASTER_DETECTION_TIMEOUT = 300;
 
                         // Disaster parameters
                         static constexpr T DISASTER_MAX_SPEED = 0.5;  // ADDED: maximum disaster speed
 
-                        // Battery & recharging parameters - improved values
-//                        static constexpr T RECHARGE_RATE       = 1.5;   // Increased from 1.0 (% per step at base)
-//                        static constexpr T DISCHARGE_RATE      = 0.15;  // Reduced from 0.5 (% per step in flight)
-//                        static constexpr TI FULLY_CHARGED_STEPS = 3;    // Reduced from 5 (steps at 100% before swap)
-
-                        // Grace period before disaster detection penalty
-//                        static constexpr TI DISASTER_DETECTION_GRACE_PERIOD = 30;
-//
-//                        static constexpr T CRITICAL_BATTERY_PENALTY = 2.0f;  // Reduced from 3.0
+                        // Battery and charging parameters
+                        static constexpr TI MAX_CHARGING_SLOTS = 2;
+                        static constexpr T CHARGING_STATION_RANGE = 1.0;
+                        static constexpr T CHARGING_RATE = 2.0;
+                        static constexpr T DISCHARGE_RATE = 0.12;
+                        static constexpr T MAX_SPEED           = 2.0;
+//                        static constexpr T DISCHARGE_RATE_EMERGENCY = 0.15;
                     };
 
                     template <typename T_PARAMETERS>
@@ -85,18 +83,20 @@ namespace rl_tools {
                         using PARAMETERS = T_PARAMETERS;
                         using T = typename PARAMETERS::T;
                         using TI = typename PARAMETERS::TI;
-                        static constexpr TI PER_AGENT_DIM = 7; // pos(2), vel(2), disaster_detected(1), last_detected_disaster_position(2)
+                        static constexpr TI PER_AGENT_DIM = 12; // pos(2), vel(2), battery(1), charging_station_position (2), is_charging (1), disaster_detected(1), last_detected_disaster_position(2), dead(1)
                         static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_DIM;
                     };
 
                     template <typename T, typename TI>
                     struct DroneState {
-                        T          position[2];
-                        T          velocity[2];
-                        T          acceleration[2];
-//                        DroneMode  mode;
-                        T          battery;         // [0–100]%
-                        T          last_detected_disaster_position[2]; // (–1,–1) until first detection
+                        T position[2];
+                        T velocity[2];
+                        T acceleration[2];
+                        T battery;         // [0–100]%
+                        bool is_charging;
+                        TI charging_station_entry_step;
+                        T last_detected_disaster_position[2]; // (–1,–1) until first detection
+                        bool dead;
                     };
 
                     template <typename T>
@@ -115,14 +115,9 @@ namespace rl_tools {
 
                         DroneState<T,TI>    drone_states[SPEC::PARAMETERS::N_AGENTS];
                         DisasterState<T>    disaster;
-
-                        // store the last step when each cell was visited
-//                        TI last_visit[SPEC::PARAMETERS::GRID_SIZE_X * SPEC::PARAMETERS::GRID_SIZE_Y];
-
                         TI step_count;
-
                         TI disaster_undetected_steps;
-
+                        TI charging_occupancy;
                     };
 
 
@@ -139,9 +134,9 @@ namespace rl_tools {
                                 matrix::Specification<
                                         T, TI,
                                         /*ROWS=*/1,
-                                        /*COLS=*/PARAMETERS::N_AGENTS * 2,
+                                        /*COLS=*/PARAMETERS::N_AGENTS * 3,
                                         /*RowMajor=*/true,
-                                        matrix::layouts::Fixed<TI,1,PARAMETERS::N_AGENTS * 2>
+                                        matrix::layouts::Fixed<TI,1,PARAMETERS::N_AGENTS * 3>
                                 >
                         >;
 
@@ -162,7 +157,7 @@ namespace rl_tools {
                     using ObservationPrivileged = Observation;
                     using Action = typename SPEC::ACTION;
                     static constexpr TI N_AGENTS = Parameters::N_AGENTS;
-                    static constexpr TI PER_AGENT_ACTION_DIM = 2; // acceleration in x and y
+                    static constexpr TI PER_AGENT_ACTION_DIM = 3; // acceleration in x and y
                     static constexpr TI ACTION_DIM = N_AGENTS * PER_AGENT_ACTION_DIM;
                     static constexpr TI EPISODE_STEP_LIMIT = Parameters::EPISODE_STEP_LIMIT;
                 };
