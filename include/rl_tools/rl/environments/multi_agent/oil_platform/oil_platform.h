@@ -16,68 +16,41 @@ namespace rl_tools {
         namespace environments {
             namespace multi_agent {
                 namespace oil_platform {
-
-                    // Drone modes
-//                    enum class DroneMode {
-//                        NORMAL = 0,
-//                        EMERGENCY = 1,
-//                        RECHARGING = 2
-//                    };
-
                     template <typename T_T, typename T_TI>
                     struct DefaultParameters {
                         using T = T_T;
                         using TI = T_TI;
-                        // Number of drones total and deployed
-                        static constexpr TI N_AGENTS           = 3;
-//                        static constexpr TI ACTIVE_DRONES      = 3;
+                        // Number of drones
+                        static constexpr TI N_AGENTS = 3;
 
                         // Sensing & motion
-                        static constexpr T SENSOR_RANGE        = 5.0;
-                        static constexpr T DT                  = 0.05;
-                        static constexpr T MAX_ACCELERATION    = 2.0;
+                        static constexpr T SENSOR_RANGE = 5.0;
+                        static constexpr T DT = 0.05;
+//                        static constexpr T MAX_ACCELERATION = 2.0;
+                        static constexpr T MAX_SPEED = 2.0;
 
                         // Geometry of platform & pipes
                         // Square platform at center, half-size
-                        static constexpr T PLATFORM_HALF_SIZE  = 2.0;
-                        // Pipes extending from platform, width
-                        static constexpr T PIPE_WIDTH          = 2.0;  // Increased from 1.0 for better visibility
-
-//                        static constexpr T EXPLORATION_BONUS   = 0.05;
-//                        static constexpr T HIGH_PRIORITY_BONUS = 1.0f;
-//
-//                        // how many steps before a cell "ages out"
-//                        static constexpr TI REVISIT_THRESHOLD  = 300;
-//
-//                        // small bonus for every non-priority cell
-//                        static constexpr T GENERAL_AREA_BONUS  = 0.01f;
-//
-//                        // scales the proximity reward when disaster is active
-//                        static constexpr T DISASTER_PRIORITY   = 8.0f;
-
-
-                        // Grid discretization
-//                        static constexpr T GRID_CELL_SIZE      = 1.0;
-                        static constexpr TI GRID_SIZE_X        = 20;
-                        static constexpr TI GRID_SIZE_Y        = 20;
+                        static constexpr T PLATFORM_HALF_SIZE = 2.0;
+                        static constexpr T PIPE_WIDTH = 2.0;
+                        static constexpr TI GRID_SIZE_X = 20;
+                        static constexpr TI GRID_SIZE_Y = 20;
 
                         // Episode length
                         static constexpr TI EPISODE_STEP_LIMIT = 1000;
 
-                        static constexpr TI DISASTER_DETECTION_TIMEOUT = 200;
-
                         // Disaster parameters
-                        static constexpr T DISASTER_MAX_SPEED = 0.5;  // ADDED: maximum disaster speed
+                        static constexpr T DISASTER_MAX_SPEED = 0.5;
+                        static constexpr TI DISASTER_MINIMUM_SPAWN_STEP = 200;
 
-                        // Battery & recharging parameters - improved values
-//                        static constexpr T RECHARGE_RATE       = 1.5;   // Increased from 1.0 (% per step at base)
-//                        static constexpr T DISCHARGE_RATE      = 0.15;  // Reduced from 0.5 (% per step in flight)
-//                        static constexpr TI FULLY_CHARGED_STEPS = 3;    // Reduced from 5 (steps at 100% before swap)
-
-                        // Grace period before disaster detection penalty
-//                        static constexpr TI DISASTER_DETECTION_GRACE_PERIOD = 30;
-//
-//                        static constexpr T CRITICAL_BATTERY_PENALTY = 2.0f;  // Reduced from 3.0
+                        // Charging parameters
+                        static constexpr T CHARGING_RATE = 1.0;
+                        static constexpr T DISCHARGE_RATE = 0.15;
+                        static constexpr T CHARGING_STATION_RANGE = 2.0;
+                        static constexpr T CHARGING_VELOCITY_THRESHOLD = 0.5;
+                        static constexpr T CHARGING_STATION_POSITION_X = 5.0;
+                        static constexpr T CHARGING_STATION_POSITION_Y = 5.0;
+                        // static constexpr T CHARGING_ACCELERATION_THRESHOLD = 0.5;
                     };
 
                     template <typename T_PARAMETERS>
@@ -85,44 +58,52 @@ namespace rl_tools {
                         using PARAMETERS = T_PARAMETERS;
                         using T = typename PARAMETERS::T;
                         using TI = typename PARAMETERS::TI;
-                        static constexpr TI PER_AGENT_DIM = 7; // pos(2), vel(2), disaster_detected(1), last_detected_disaster_position(2)
-                        static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_DIM;
+                        static constexpr TI PER_AGENT_DIM = 8; // pos(2), vel(2), battery (1), dead (1), is_charging (1), is_detecting(1)
+                        static constexpr TI SHARED_DIM = 5; // last_detected_disaster_pos(2), charging_station_pos(2), disaster_detected_global (1)
+                        static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_DIM + SHARED_DIM;
                     };
 
                     template <typename T, typename TI>
                     struct DroneState {
-                        T          position[2];
-                        T          velocity[2];
-                        T          acceleration[2];
-//                        DroneMode  mode;
-                        T          battery;         // [0–100]%
-                        T          last_detected_disaster_position[2]; // (–1,–1) until first detection
+                        T position[2];
+                        T velocity[2];
+                        T battery;
+                        bool dead;
+                        bool is_charging;
+                        bool is_detecting;
                     };
 
                     template <typename T>
                     struct DisasterState {
                         bool active;
                         T position[2];
-                        T velocity[2];  // ADDED: velocity vector for moving disaster
+                        T velocity[2];
                     };
 
+                    template <typename T, typename TI>
+                    struct Metrics {
+                        T total_coverage_ratio;
+                        TI coverage_measurement_count;
+                        TI disaster_active_steps;
+                        TI total_charging_sessions;
+                        TI appropriate_charging_count;
+                        TI inappropriate_charging_count;
+                        TI death_count;
+                    };
 
 
                     template <typename SPEC>
                     struct State {
-                        using T  = typename SPEC::T;
+                        using T = typename SPEC::T;
                         using TI = typename SPEC::TI;
 
-                        DroneState<T,TI>    drone_states[SPEC::PARAMETERS::N_AGENTS];
-                        DisasterState<T>    disaster;
-
-                        // store the last step when each cell was visited
-//                        TI last_visit[SPEC::PARAMETERS::GRID_SIZE_X * SPEC::PARAMETERS::GRID_SIZE_Y];
-
-                        TI step_count;
-
-                        TI disaster_undetected_steps;
-
+                        DroneState<T, TI> drone_states[SPEC::PARAMETERS::N_AGENTS];
+                        DisasterState<T> disaster;
+                        Metrics<T, TI> metrics;
+                        bool disaster_detected_global;
+                        T step_count;
+                        T disaster_undetected_steps;
+                        T last_detected_disaster_position[2];
                     };
 
 
@@ -144,7 +125,6 @@ namespace rl_tools {
                                         matrix::layouts::Fixed<TI,1,PARAMETERS::N_AGENTS * 2>
                                 >
                         >;
-
                     };
 
                 } // namespace oil_platform

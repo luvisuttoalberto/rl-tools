@@ -14,10 +14,10 @@ namespace rl_tools::rl::zoo::oil_platform_v1::sac {
 
 //            static constexpr TI ACTOR_HIDDEN_DIM = 64;
 //            static constexpr TI ACTOR_NUM_LAYERS = 3;
-//            static constexpr auto ACTOR_ACTIVATION_FUNCTION = nn::activation_functions::ActivationFunction::FAST_TANH;
+            static constexpr auto ACTOR_ACTIVATION_FUNCTION = nn::activation_functions::ActivationFunction::FAST_TANH;
 //            static constexpr TI CRITIC_HIDDEN_DIM = 128;
 //            static constexpr TI CRITIC_NUM_LAYERS = 3;
-//            static constexpr auto CRITIC_ACTIVATION_FUNCTION = nn::activation_functions::ActivationFunction::FAST_TANH;
+            static constexpr auto CRITIC_ACTIVATION_FUNCTION = nn::activation_functions::ActivationFunction::FAST_TANH;
 
 //            struct OPTIMIZER_PARAMETERS: nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<T>{
 //                static constexpr T ALPHA = 1e-3;
