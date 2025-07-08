@@ -31,6 +31,151 @@ namespace rl_tools {
         return magnitude(device, x1-x2, y1-y2);
     }
 
+    template<typename DEVICE, typename PARAMS, typename T, typename RNG>
+    RL_TOOLS_FUNCTION_PLACEMENT static void sample_roi_position(
+            DEVICE& device, T& x, T& y, RNG& rng)
+    {
+        using TI = typename PARAMS::TI;
+        TI idx = random::uniform_int_distribution(device.random, TI(0),
+                                                  PARAMS::ROI_SIZE-1, rng);
+        x = PARAMS::ROI_CATALOGUE[idx].x;
+        y = PARAMS::ROI_CATALOGUE[idx].y;
+    }
+
+    template<typename DEVICE, typename PARAMS>
+    RL_TOOLS_FUNCTION_PLACEMENT static
+    typename PARAMS::T inbounds_fraction(DEVICE& device,
+                                         typename PARAMS::T x,
+                                         typename PARAMS::T y)
+    {
+        using T = typename PARAMS::T;
+        const T R = PARAMS::SENSOR_RANGE;
+        /* distance to each wall */
+        T dxL = x;
+        T dxR = PARAMS::GRID_SIZE_X - x;
+        T dyB = y;
+        T dyT = PARAMS::GRID_SIZE_Y - y;
+
+        T f = T(1);               // full circle by default
+        /* each wall cuts a circular segment if distance<R */
+        if(dxL < R) f -= math::pow(device.math, (R-dxL)/R, 2);
+        if(dxR < R) f -= math::pow(device.math, (R-dxR)/R, 2);
+        if(dyB < R) f -= math::pow(device.math, (R-dyB)/R, 2);
+        if(dyT < R) f -= math::pow(device.math, (R-dyT)/R, 2);
+        return math::clamp(device.math, f, T(0), T(1));
+    }
+
+
+    template <typename DEVICE, typename PARAMS, typename T>
+    RL_TOOLS_FUNCTION_PLACEMENT static T gaussian_potential(DEVICE& device,
+                       T px, T py,              // point to evaluate
+                       T cx, T cy,              // platform centre
+                       T sigma)                 // Gaussian width
+    {
+        T adx = math::abs(device.math, px - cx);
+        T ady = math::abs(device.math, py - cy);
+
+        /* square platform */
+        T dx_pl = math::max(device.math, adx - PARAMS::PLATFORM_HALF_SIZE, T(0));
+        T dy_pl = math::max(device.math, ady - PARAMS::PLATFORM_HALF_SIZE, T(0));
+        T d2_pl = dx_pl * dx_pl + dy_pl * dy_pl;
+
+        /* horizontal pipe */
+        T dy_ph = math::max(device.math, ady - PARAMS::PIPE_WIDTH / 2, T(0));
+        T d2_ph = dy_ph * dy_ph;
+
+        /* vertical pipe */
+        T dx_pv = math::max(device.math, adx - PARAMS::PIPE_WIDTH / 2, T(0));
+        T d2_pv = dx_pv * dx_pv;
+
+        T d2 = math::min(device.math, d2_pl,
+                         math::min(device.math, d2_ph, d2_pv));
+
+        return math::exp(device.math, -d2 / (T(2) * sigma * sigma));
+    }
+
+    template<typename DEVICE, typename PARAMS>
+    RL_TOOLS_FUNCTION_PLACEMENT static
+    typename PARAMS::T overlap_penalty(DEVICE& device,
+                                       const typename PARAMS::T (&pos)[PARAMS::N_AGENTS][2], const bool disaster_phase)
+    {
+        using T  = typename PARAMS::T;
+        using TI = typename PARAMS::TI;
+        T sum = 0;
+        for(TI i=0;i<PARAMS::N_AGENTS;++i){
+            for(TI j=i+1;j<PARAMS::N_AGENTS;++j){
+                T d = distance(device,pos[i][0],pos[i][1],pos[j][0],pos[j][1]);
+                if (disaster_phase){
+                    sum += math::exp(device.math, -(d*d)/(PARAMS::OVERLAP_RHO_DETECTION*PARAMS::OVERLAP_RHO_DETECTION));
+                } else{
+                    sum += math::exp(device.math, -(d*d)/(PARAMS::OVERLAP_RHO_COVERAGE*PARAMS::OVERLAP_RHO_COVERAGE));
+                }
+            }
+        }
+        return sum;
+    }
+
+    /* --- helper: logistic sigmoid ----------------------------------------- */
+    template<typename DEVICE, typename T>
+    RL_TOOLS_FUNCTION_PLACEMENT static T logistic(DEVICE& device, T x)
+    {
+        return T(1) / (T(1) + math::exp(device.math, -x));
+    }
+
+    /* ---------- helper: one-shot coverage ratio over high-priority areas --- */
+    template<typename DEVICE, typename SPEC>
+    RL_TOOLS_FUNCTION_PLACEMENT static typename SPEC::T
+    priority_area_coverage(DEVICE& device,
+                           const typename SPEC::STATE& s_next)
+    {
+        using T      = typename SPEC::T;
+        using TI     = typename SPEC::TI;
+        using PARAMS = typename SPEC::PARAMETERS;
+        constexpr TI N     = PARAMS::N_AGENTS;
+        constexpr TI RES   = PARAMS::GRID_RES;          // 20
+        constexpr T  DX    = T(PARAMS::GRID_SIZE_X) / RES;
+        constexpr T  DY    = T(PARAMS::GRID_SIZE_Y) / RES;
+        constexpr T  CX    = PARAMS::GRID_SIZE_X * T(0.5);
+        constexpr T  CY    = PARAMS::GRID_SIZE_Y * T(0.5);
+
+        /* platform & pipe masks pre-computed once */
+        TI total_priority = 0, covered_priority = 0;
+        for (TI gx = 0; gx < RES; ++gx){
+            for (TI gy = 0; gy < RES; ++gy){
+                T cx_cell = DX * (gx + T(0.5));
+                T cy_cell = DY * (gy + T(0.5));
+
+                bool in_platform = (std::abs(cx_cell - CX) <= PARAMS::PLATFORM_HALF_SIZE &&
+                                    std::abs(cy_cell - CY) <= PARAMS::PLATFORM_HALF_SIZE);
+
+                bool in_pipe_h = (std::abs(cy_cell - CY) <= PARAMS::PIPE_WIDTH * T(0.5) &&
+                                  std::abs(cx_cell - CX) >= PARAMS::PLATFORM_HALF_SIZE);
+
+                bool in_pipe_v = (std::abs(cx_cell - CX) <= PARAMS::PIPE_WIDTH * T(0.5) &&
+                                  std::abs(cy_cell - CY) >= PARAMS::PLATFORM_HALF_SIZE);
+
+                bool is_priority = in_platform || in_pipe_h || in_pipe_v;
+                if(!is_priority) continue;
+                ++total_priority;
+
+                /* covered if ANY live drone has the cell centre within sensor range */
+                for (TI i = 0; i < N; ++i){
+                    const auto& d = s_next.drone_states[i];
+                    if(d.dead) continue;
+                    T dist = (d.position[0]-cx_cell)*(d.position[0]-cx_cell)
+                             + (d.position[1]-cy_cell)*(d.position[1]-cy_cell);
+                    if(dist <= PARAMS::SENSOR_RANGE*PARAMS::SENSOR_RANGE){
+                        ++covered_priority;
+                        break;
+                    }
+                }
+            }
+        }
+        return (total_priority>0) ? T(covered_priority)/T(total_priority) : T(0);
+    }
+
+
+
 
     template<typename DEVICE, typename SPEC>
     RL_TOOLS_FUNCTION_PLACEMENT static void malloc(
@@ -113,7 +258,21 @@ namespace rl_tools {
         state.metrics.appropriate_charging_count = 0;
         state.metrics.inappropriate_charging_count = 0;
         state.metrics.death_count = 0;
+        state.metrics.cumulative_potential_reward = 0;
+        state.metrics.potential_steps = 0;
 
+        state.disaster_spawn_step  = 0;
+        state.metrics.cumulative_detection_latency = 0;
+        state.metrics.detection_count              = 0;
+
+        /* ───── initialise coverage bookkeeping ───── */
+//        state.metrics.total_covered_cells = 0;
+//        for (int i = 0; i < SPEC::PARAMETERS::GRID_RES; i++) {
+//            for (int j = 0; j < SPEC::PARAMETERS::GRID_RES; j++) {
+//                state.metrics.covered_grid[i][j] = false;
+//                state.metrics.visit_age_grid[i][j] = SPEC::PARAMETERS::NOVELTY_WINDOW + 1;
+//            }
+//        }
     }
 
     template<typename DEVICE, typename SPEC>
@@ -160,6 +319,21 @@ namespace rl_tools {
         state.metrics.appropriate_charging_count = 0;
         state.metrics.inappropriate_charging_count = 0;
         state.metrics.death_count = 0;
+        state.metrics.cumulative_potential_reward = 0;
+        state.metrics.potential_steps = 0;
+
+        state.disaster_spawn_step  = 0;
+        state.metrics.cumulative_detection_latency = 0;
+        state.metrics.detection_count              = 0;
+
+//        /* ───── initialise coverage bookkeeping ───── */
+//        state.metrics.total_covered_cells = 0;
+//        for (int i = 0; i < SPEC::PARAMETERS::GRID_RES; i++) {
+//            for (int j = 0; j < SPEC::PARAMETERS::GRID_RES; j++) {
+//                state.metrics.covered_grid[i][j] = false;
+//                state.metrics.visit_age_grid[i][j] = SPEC::PARAMETERS::NOVELTY_WINDOW + 1;
+//            }
+//        }
     }
 
     template<typename DEVICE, typename SPEC, typename RNG>
@@ -197,19 +371,9 @@ namespace rl_tools {
 
         // (1) Disaster: 2% to start in any HIGH‑PRIORITY area, remains static once created
         if (!state.disaster.active) {
-            if (state.step_count >= PARAMS::DISASTER_MINIMUM_SPAWN_STEP && random::uniform_real_distribution(device.random, T(0), T(1), rng) < T(0.02)) {
+            if (state.step_count >= PARAMS::DISASTER_MINIMUM_SPAWN_STEP && random::uniform_real_distribution(device.random, T(0), T(1), rng) < T(PARAMS::DISASTER_PROBABILITY_SPAWN)) {
                 T x, y;
-                bool in_high_priority_zone = false;
-                while (!in_high_priority_zone){
-                    x = random::uniform_real_distribution(device.random, T(0), T(PARAMS::GRID_SIZE_X), rng);
-                    y = random::uniform_real_distribution(device.random, T(0), T(PARAMS::GRID_SIZE_Y), rng);
-                    T adx = std::abs(x - cx);
-                    T ady = std::abs(y - cy);
-                    bool inPlat = (adx <= PARAMS::PLATFORM_HALF_SIZE && ady <= PARAMS::PLATFORM_HALF_SIZE);
-                    bool inPipeH = (ady <= PARAMS::PIPE_WIDTH / 2 && adx >= PARAMS::PLATFORM_HALF_SIZE);
-                    bool inPipeV = (adx <= PARAMS::PIPE_WIDTH / 2 && ady >= PARAMS::PLATFORM_HALF_SIZE);
-                    in_high_priority_zone = inPlat || inPipeH || inPipeV;
-                }
+                sample_roi_position<DEVICE,PARAMS>(device,x,y,rng);
                 next_state.disaster.active = true;
                 next_state.disaster.position[0] = x;
                 next_state.disaster.position[1] = y;
@@ -218,7 +382,9 @@ namespace rl_tools {
                 T angle = random::uniform_real_distribution(device.random, T(0), T(2 * M_PI), rng);
                 next_state.disaster.velocity[0] = PARAMS::DISASTER_MAX_SPEED * math::cos(device.math, angle);
                 next_state.disaster.velocity[1] = PARAMS::DISASTER_MAX_SPEED * math::sin(device.math, angle);
+                next_state.disaster_spawn_step = state.step_count;   // mark this step
             } else {
+                next_state.disaster_spawn_step = state.disaster_spawn_step;
                 next_state.disaster.active = false;
                 next_state.disaster.position[0] = state.disaster.position[0];
                 next_state.disaster.position[1] = state.disaster.position[1];
@@ -232,32 +398,48 @@ namespace rl_tools {
             next_state.disaster.position[1] = state.disaster.position[1] + state.disaster.velocity[1] * PARAMS::DT;
             next_state.disaster.velocity[0] = state.disaster.velocity[0];
             next_state.disaster.velocity[1] = state.disaster.velocity[1];
+            next_state.disaster_spawn_step = state.disaster_spawn_step;
         }
 
-        // (2) Per-drone update with charging and death logic
+        // (2) Per-drone update for position and velocity
         for (TI agent_i = 0; agent_i < N_AGENTS; agent_i++) {
+
             const auto &agent_state = state.drone_states[agent_i];
             auto &agent_next_state = next_state.drone_states[agent_i];
+            agent_next_state = agent_state;
             if (!agent_state.dead) {
+
+                // TODO: REMOVE THIS WHEN REINTRODUCING BATTERY
+                agent_next_state.dead = false;
+                agent_next_state.is_charging = false;
+
+                // VELOCITY CONTROL
+
 //                T desired_vx = get(action, 0, agent_i * 2 + 0) * PARAMS::MAX_SPEED;
 //                T desired_vy = get(action, 0, agent_i * 2 + 1) * PARAMS::MAX_SPEED;
-//
-//                // Set velocity directly to desired values
-//                agent_next_state.velocity[0] = desired_vx;
-//                agent_next_state.velocity[1] = desired_vy;
-//
-//                // Clamp velocity magnitude to MAX_SPEED (redundant but safe)
-//                T speed = magnitude(device, agent_next_state.velocity[0], agent_next_state.velocity[1]);
-//                if (speed > PARAMS::MAX_SPEED) {
-//                    T scale = PARAMS::MAX_SPEED / speed;
-//                    agent_next_state.velocity[0] *= scale;
-//                    agent_next_state.velocity[1] *= scale;
-//                }
-                T ax = get(action, 0, agent_i * 2 + 0) * PARAMS::MAX_ACCELERATION;
-                T ay = get(action, 0, agent_i * 2 + 1) * PARAMS::MAX_ACCELERATION;
 
-                agent_next_state.velocity[0] = agent_state.velocity[0] + ax * PARAMS::DT;
-                agent_next_state.velocity[1] = agent_state.velocity[1] + ay * PARAMS::DT;
+                T desired_vx = get(action, 0, agent_i * 2 + 0);   // already ∈[-1,1]
+                T desired_vy = get(action, 0, agent_i * 2 + 1);
+
+// --- optional inertia (comment out if you don’t want it yet) ---
+                constexpr T ALPHA = 0.6;                  // 0<α≤1  → smaller α = more inertia
+                desired_vx = agent_state.velocity[0] + ALPHA * (desired_vx * PARAMS::MAX_SPEED
+                                                                - agent_state.velocity[0]);
+                desired_vy = agent_state.velocity[1] + ALPHA * (desired_vy * PARAMS::MAX_SPEED
+                                                                - agent_state.velocity[1]);
+
+
+                // Set velocity directly to desired values
+                agent_next_state.velocity[0] = desired_vx;
+                agent_next_state.velocity[1] = desired_vy;
+
+
+                // ACCELERATION CONTROL
+//                T ax = get(action, 0, agent_i * 2 + 0) * PARAMS::MAX_ACCELERATION;
+//                T ay = get(action, 0, agent_i * 2 + 1) * PARAMS::MAX_ACCELERATION;
+//
+//                agent_next_state.velocity[0] = agent_state.velocity[0] + ax * PARAMS::DT;
+//                agent_next_state.velocity[1] = agent_state.velocity[1] + ay * PARAMS::DT;
 
                 // clamp velocity magnitude to MAX_SPEED
                 T speed = magnitude(device, agent_next_state.velocity[0], agent_next_state.velocity[1]);
@@ -292,74 +474,130 @@ namespace rl_tools {
             }
         }
 
-        for (TI agent_i = 0; agent_i < N_AGENTS; agent_i++) {
-            auto& agent_next_state = next_state.drone_states[agent_i];
-            const auto& agent_state = state.drone_states[agent_i];
+        // (2) Per-drone update for battery and charging
+//        for (TI agent_i = 0; agent_i < N_AGENTS; agent_i++) {
+//            auto& agent_next_state = next_state.drone_states[agent_i];
+//            const auto& agent_state = state.drone_states[agent_i];
+//
+//            if(!agent_state.dead) {
+//                // Check if drone is at charging station
+//                T distance_to_charging_station = distance(device, agent_next_state.position[0], agent_next_state.position[1], PARAMS::CHARGING_STATION_POSITION_X, PARAMS::CHARGING_STATION_POSITION_Y);
+//                bool at_charging_station = (distance_to_charging_station < PARAMS::CHARGING_STATION_RANGE);
+//                T velocity_magnitude = magnitude(device, agent_next_state.velocity[0], agent_next_state.velocity[1]);
+//                bool is_stationary = (velocity_magnitude < PARAMS::CHARGING_VELOCITY_THRESHOLD);
+//                agent_next_state.is_charging = (at_charging_station && is_stationary);
+//
+//                // Update battery
+//                if (agent_next_state.is_charging) {
+//                    agent_next_state.battery = std::min(T(100), T(agent_state.battery + PARAMS::CHARGING_RATE));
+//                } else {
+//                    agent_next_state.battery = std::max(T(0), T(agent_state.battery - PARAMS::DISCHARGE_RATE));
+//                }
+//
+//                // Check if drone dies
+//                if (agent_next_state.battery <= 0) {
+//                    agent_next_state.dead = true;
+//                    agent_next_state.velocity[0] = 0;
+//                    agent_next_state.velocity[1] = 0;
+//                    agent_next_state.battery = 0;
+//                    agent_next_state.is_charging = false;
+//                    agent_next_state.is_detecting = false;
+//                } else {
+//                    agent_next_state.dead = false;
+//                }
+//            }
+//        }
 
-            if(!agent_state.dead) {
-                // Check if drone is at charging station
-                T distance_to_charging_station = distance(device, agent_next_state.position[0], agent_next_state.position[1], PARAMS::CHARGING_STATION_POSITION_X, PARAMS::CHARGING_STATION_POSITION_Y);
-                bool at_charging_station = (distance_to_charging_station < PARAMS::CHARGING_STATION_RANGE);
-                T velocity_magnitude = magnitude(device, agent_next_state.velocity[0], agent_next_state.velocity[1]);
-                bool is_stationary = (velocity_magnitude < PARAMS::CHARGING_VELOCITY_THRESHOLD);
-                agent_next_state.is_charging = (at_charging_station && is_stationary);
 
-                // Update battery
-                if (agent_next_state.is_charging) {
-                    agent_next_state.battery = std::min(T(100), T(agent_state.battery + PARAMS::CHARGING_RATE));
-                } else {
-                    agent_next_state.battery = std::max(T(0), T(agent_state.battery - PARAMS::DISCHARGE_RATE));
-                }
+//        // (3) Disaster detection logic
+//        bool detection = false;
+//        if (next_state.disaster.active) {
+//            for (TI agent_i = 0; agent_i < N_AGENTS; ++agent_i) {
+//                auto &agent_next_state = next_state.drone_states[agent_i];
+//
+//                // Skip dead drones for disaster detection
+//                if (!agent_next_state.dead) {
+//                    if (distance(device, agent_next_state.position[0], agent_next_state.position[1], next_state.disaster.position[0], next_state.disaster.position[1]) < PARAMS::SENSOR_RANGE) {
+//                        detection = true;
+//                        agent_next_state.is_detecting = true;
+//                    } else {
+//                        agent_next_state.is_detecting = false;
+//                    }
+//                }
+//            }
+//
+//            // Update all living drones' last detected position if any detection
+//            if (detection) {
+//                next_state.disaster_detected_global = true;
+//                next_state.disaster_undetected_steps = 0;
+//                next_state.last_detected_disaster_position[0] = next_state.disaster.position[0];
+//                next_state.last_detected_disaster_position[1] = next_state.disaster.position[1];
+//            } else {
+//                next_state.disaster_undetected_steps = state.disaster_undetected_steps + 1;
+//                next_state.last_detected_disaster_position[0] = state.last_detected_disaster_position[0];
+//                next_state.last_detected_disaster_position[1] = state.last_detected_disaster_position[1];
+//                next_state.disaster_detected_global = state.disaster_detected_global;
+//            }
+//        } else {
+//            next_state.disaster_detected_global = false;
+//            next_state.disaster_undetected_steps = 0;
+//            next_state.last_detected_disaster_position[0] = state.last_detected_disaster_position[0];
+//            next_state.last_detected_disaster_position[1] = state.last_detected_disaster_position[1];
+//        }
 
-                // Check if drone dies
-                if (agent_next_state.battery <= 0) {
-                    agent_next_state.dead = true;
-                    agent_next_state.velocity[0] = 0;
-                    agent_next_state.velocity[1] = 0;
-                    agent_next_state.battery = 0;
-                    agent_next_state.is_charging = false;
-                    agent_next_state.is_detecting = false;
-                } else {
-                    agent_next_state.dead = false;
-                }
-            }
-        }
+        /* ───── (3)  Disaster detection logic  ───────────────────────────────── */
+        constexpr T beta = PARAMS::DETECTION_BETA;
 
 
-        // (3) Disaster detection logic
-        bool detection = false;
+        bool any_detection = false;
+
         if (next_state.disaster.active) {
             for (TI agent_i = 0; agent_i < N_AGENTS; ++agent_i) {
-                auto &agent_next_state = next_state.drone_states[agent_i];
+                auto&       ag_next = next_state.drone_states[agent_i];
+                const auto& ag_prev = state.drone_states[agent_i];
 
-                // Skip dead drones for disaster detection
-                if (!agent_next_state.dead) {
-                    if (distance(device, agent_next_state.position[0], agent_next_state.position[1], next_state.disaster.position[0], next_state.disaster.position[1]) < PARAMS::SENSOR_RANGE) {
-                        detection = true;
-                        agent_next_state.is_detecting = true;
-                    } else {
-                        agent_next_state.is_detecting = false;
-                    }
+                if (ag_next.dead) { ag_next.is_detecting = false; continue; }
+
+                /* distance to disaster */
+                T d = distance(device,
+                               ag_next.position[0], ag_next.position[1],
+                               next_state.disaster.position[0], next_state.disaster.position[1]);
+
+                /* smooth detection probability */
+                T p_det = logistic(device, beta * (PARAMS::SENSOR_RANGE - d));
+
+                /* Bernoulli draw */
+                bool detects = random::uniform_real_distribution(device.random,
+                                                                 T(0), T(1), rng) < p_det;
+
+                ag_next.is_detecting = detects;
+                if (detects) {
+                    any_detection = true;
                 }
             }
 
-            // Update all living drones' last detected position if any detection
-            if (detection) {
-                next_state.disaster_detected_global = true;
+            /* -------- global bookkeeping ------------------------------------- */
+            if (any_detection) {
+                next_state.disaster_detected_global  = true;
                 next_state.disaster_undetected_steps = 0;
                 next_state.last_detected_disaster_position[0] = next_state.disaster.position[0];
                 next_state.last_detected_disaster_position[1] = next_state.disaster.position[1];
             } else {
+                next_state.disaster_detected_global  = state.disaster_detected_global;
                 next_state.disaster_undetected_steps = state.disaster_undetected_steps + 1;
                 next_state.last_detected_disaster_position[0] = state.last_detected_disaster_position[0];
                 next_state.last_detected_disaster_position[1] = state.last_detected_disaster_position[1];
             }
-        } else {
-            next_state.disaster_detected_global = false;
+        }
+/* disaster inactive → reset flags exactly as before */
+        else {
+            next_state.disaster_detected_global  = false;
             next_state.disaster_undetected_steps = 0;
             next_state.last_detected_disaster_position[0] = state.last_detected_disaster_position[0];
             next_state.last_detected_disaster_position[1] = state.last_detected_disaster_position[1];
         }
+
+
 
         next_state.metrics = state.metrics;
 
@@ -368,38 +606,54 @@ namespace rl_tools {
             next_state.metrics.disaster_active_steps = state.metrics.disaster_active_steps + 1;
         }
 
-        // Update charging metrics
-        TI charging_sessions = 0;
-        TI appropriate_charging_sessions = 0;
-        TI inappropriate_charging_sessions = 0;
-        TI death_count = 0;
-
-        for (TI agent_i = 0; agent_i < N_AGENTS; ++agent_i) {
-            const auto &agent_state = state.drone_states[agent_i];
-            const auto &agent_next_state = next_state.drone_states[agent_i];
-
-            // Count new charging sessions (started charging this step)
-            if (agent_next_state.is_charging) {
-                charging_sessions++;
-
-                // Classify as appropriate or inappropriate
-                if (agent_state.battery < T(50)) {
-                    appropriate_charging_sessions++;
-                } else {
-                    inappropriate_charging_sessions++;
-                }
-            }
-
-            // Count new deaths
-            if (!agent_state.dead && agent_next_state.dead) {
-                death_count++;
-            }
+        /* ----- first-detection latency ------------------------------------ */
+        if (next_state.disaster_detected_global && !state.disaster_detected_global) {
+            TI latency = (state.step_count + 1)               // step *after* transition
+                         - next_state.disaster_spawn_step;    // minus spawn step
+            next_state.metrics.cumulative_detection_latency =
+                    state.metrics.cumulative_detection_latency + latency;
+            next_state.metrics.detection_count =
+                    state.metrics.detection_count + 1;
+        } else {
+            /* plain carry-over */
+            next_state.metrics.cumulative_detection_latency =
+                    state.metrics.cumulative_detection_latency;
+            next_state.metrics.detection_count =
+                    state.metrics.detection_count;
         }
 
-        next_state.metrics.total_charging_sessions = state.metrics.total_charging_sessions + charging_sessions;
-        next_state.metrics.appropriate_charging_count = state.metrics.appropriate_charging_count + appropriate_charging_sessions;
-        next_state.metrics.inappropriate_charging_count = state.metrics.inappropriate_charging_count + inappropriate_charging_sessions;
-        next_state.metrics.death_count = state.metrics.death_count + death_count;
+//        // Update charging metrics
+//        TI charging_sessions = 0;
+//        TI appropriate_charging_sessions = 0;
+//        TI inappropriate_charging_sessions = 0;
+//        TI death_count = 0;
+//
+//        for (TI agent_i = 0; agent_i < N_AGENTS; ++agent_i) {
+//            const auto &agent_state = state.drone_states[agent_i];
+//            const auto &agent_next_state = next_state.drone_states[agent_i];
+//
+//            // Count new charging sessions (started charging this step)
+//            if (agent_next_state.is_charging) {
+//                charging_sessions++;
+//
+//                // Classify as appropriate or inappropriate
+//                if (agent_state.battery < T(50)) {
+//                    appropriate_charging_sessions++;
+//                } else {
+//                    inappropriate_charging_sessions++;
+//                }
+//            }
+//
+//            // Count new deaths
+//            if (!agent_state.dead && agent_next_state.dead) {
+//                death_count++;
+//            }
+//        }
+//
+//        next_state.metrics.total_charging_sessions = state.metrics.total_charging_sessions + charging_sessions;
+//        next_state.metrics.appropriate_charging_count = state.metrics.appropriate_charging_count + appropriate_charging_sessions;
+//        next_state.metrics.inappropriate_charging_count = state.metrics.inappropriate_charging_count + inappropriate_charging_sessions;
+//        next_state.metrics.death_count = state.metrics.death_count + death_count;
 
         // (5) Advance step count
         next_state.step_count = state.step_count + 1;
@@ -427,421 +681,91 @@ namespace rl_tools {
         const T cy = PARAMS::GRID_SIZE_Y / 2;
 
         T total_reward = 0;
-        T alive_agents_count = 0;
+/* ---------------------------------------------------------------
+   Phase selector
+   --------------------------------------------------------------- */
+        bool disaster_phase = next_state.disaster.active;
 
-        // Death penalties
-        T death_penalty = -10;
-        T death_termination_penalty = -50;
-//        T survival_bonus_per_agent = 0.1;
+/* ---------------------------------------------------------------
+   1.  Gaussian attraction
+   --------------------------------------------------------------- */
+        T sigma = disaster_phase ? PARAMS::GAUSS_SIGMA_EVENT
+                                 : PARAMS::GAUSS_SIGMA_COVER;
 
-        // Charging and battery management penalties
-        T necessary_charging_reward = 6;
-        T convenient_charging_reward = 3;
-        T unnecessary_charging_penalty = -2;
-        T critical_battery_level_penalty = -4;
-//        T critical_battery_level_penalty = -8;
-        T low_battery_level_penalty = -2;
-//        T low_battery_level_penalty = -4;
-        T charging_station_approach_reward = 2.5;
-//        T charging_station_approach_reward = 4;
-        T charging_station_velocity_approach_reward = 0.5;
-//        T charging_station_velocity_approach_reward = 2;
-
-        // Detection rewards
-        T single_agent_detection_reward = 1;
-        T proximity_reward = 3;
-        T separation_reward = 4;
-        T disaster_approach_reward = 4;
-
-        // Coverage rewards
-        T coverage_reward_total = 3;
-        T platform_coverage_reward = 0.8;
-        T pipe_coverage_reward = 0.6;
-
-
-        // Count living agents and apply death penalty
-        for (TI agent_i = 0; agent_i < N_AGENTS; ++agent_i) {
-            const auto &agent_state = state.drone_states[agent_i];
-            const auto &agent_next_state = next_state.drone_states[agent_i];
-
-            if (!agent_state.dead) {
-                alive_agents_count++;
+        T phi_sum = 0;
+        for(TI agent_i=0; agent_i < N_AGENTS; ++agent_i){
+            const auto& agent_next_state = next_state.drone_states[agent_i];
+            if(agent_next_state.dead) {
+                continue;
             }
 
-            // NEW: Death penalty - only when drone just died this step
-            if (!agent_state.dead && agent_next_state.dead) {
-                total_reward += death_penalty;  // Large penalty for dying
-            }
-        }
+            T phi_raw = 0;
+            T frac_in = 1;
 
-//        total_reward += survival_bonus_per_agent * alive_agents_count;
-
-
-        // If all agents are dead, return large negative reward
-        if (alive_agents_count == 0) {
-            return death_termination_penalty;
-        }
-
-        // Charging and battery management rewards
-        for (TI agent_i = 0; agent_i < N_AGENTS; ++agent_i) {
-            const auto &agent_next_state = next_state.drone_states[agent_i];
-            const auto &agent_state = state.drone_states[agent_i];
-            if (!agent_next_state.dead) {
-                // Charging rewards
-                if (agent_next_state.is_charging) {
-                    if (agent_next_state.battery < 50) {
-                        total_reward += necessary_charging_reward;  // High reward for necessary charging
-                    } else if (agent_next_state.battery < 80) {
-                        total_reward += convenient_charging_reward;  // Medium reward for preventive charging
-                    } else {
-                        total_reward += unnecessary_charging_penalty;  // Penalty for unnecessary charging
-                    }
-                } else {
-                    // Battery level penalties
-                    if (agent_next_state.battery < 20) {
-                        total_reward += critical_battery_level_penalty;
-                    } else if (agent_next_state.battery < 50) {
-                        total_reward += low_battery_level_penalty;
-                    }
-                }
-
-                // Low battery navigation incentive with incremental distance-based reward
-                if (agent_next_state.battery < 50 && !agent_next_state.is_charging) {
-                    T dist_to_charging = distance(device, agent_next_state.position[0], agent_next_state.position[1],
-                                                  PARAMS::CHARGING_STATION_POSITION_X, PARAMS::CHARGING_STATION_POSITION_Y);
-                    T prev_dist_to_charging = distance(device, agent_state.position[0], agent_state.position[1],
-                                                       PARAMS::CHARGING_STATION_POSITION_X, PARAMS::CHARGING_STATION_POSITION_Y);
-
-                    // Battery urgency multiplier (0.0 to 1.0, higher when battery is lower)
-                    T battery_urgency_multiplier = (50.0 - agent_next_state.battery) / 50.0;
-
-                    // Reward for getting closer to charging station
-                    T distance_change = prev_dist_to_charging - dist_to_charging;  // positive = getting closer
-                    T base_reward = charging_station_approach_reward * distance_change;
-                    total_reward += base_reward * (1.0 + battery_urgency_multiplier);
-
-                    // Small additional reward for being close AND stationary (preparation for charging)
-                    // Keep this smaller than the actual charging reward (6)
-                    if (dist_to_charging < PARAMS::CHARGING_STATION_RANGE) {
-                        T velocity = magnitude(device, agent_next_state.velocity[0], agent_next_state.velocity[1]);
-                        if (velocity < PARAMS::CHARGING_VELOCITY_THRESHOLD) {
-                            total_reward += charging_station_velocity_approach_reward * (1.0 + battery_urgency_multiplier);  // Max 4, always < 6
-                        }
-                    }
-                }
-
-                // Low battery navigation incentive with incremental distance-based reward
-//                if (agent_next_state.battery < 50 && !agent_next_state.is_charging) {
-//                    T dist_to_charging = distance(device, agent_next_state.position[0], agent_next_state.position[1],
-//                                                  PARAMS::CHARGING_STATION_POSITION_X, PARAMS::CHARGING_STATION_POSITION_Y);
-//                    T prev_dist_to_charging = distance(device, agent_state.position[0], agent_state.position[1],
-//                                                       PARAMS::CHARGING_STATION_POSITION_X, PARAMS::CHARGING_STATION_POSITION_Y);
-//
-//                    // Battery urgency multiplier (0.0 to 1.0, higher when battery is lower)
-//                    T battery_urgency_multiplier = (50.0 - agent_next_state.battery) / 50.0;
-//
-//                    if (dist_to_charging >= PARAMS::CHARGING_STATION_RANGE) {
-//                        // Distance-based reward/penalty for movement toward/away from charging station
-//                        T distance_change = prev_dist_to_charging - dist_to_charging;  // positive = getting closer
-//                        T base_reward = charging_station_approach_reward * distance_change;
-//                        total_reward += base_reward * (1.0 + battery_urgency_multiplier);
-//                    } else {
-//                        // Close to charging station - reward for being stationary (low velocity)
-//                        T velocity = magnitude(device, agent_next_state.velocity[0], agent_next_state.velocity[1]);
-//                        T velocity_penalty = velocity / PARAMS::MAX_SPEED;  // 0.0 to 1.0, higher for faster movement
-//                        T stationary_reward = charging_station_velocity_approach_reward * (1.0 - velocity_penalty);
-//                        total_reward += stationary_reward * (1.0 + battery_urgency_multiplier);
-//                    }
-//                }
-
-//                // Low battery navigation incentive
-//                if (agent_next_state.battery < 50 && !agent_next_state.is_charging) {
-//                    T dist_to_charging = distance(device, agent_next_state.position[0], agent_next_state.position[1], PARAMS::CHARGING_STATION_POSITION_X, PARAMS::CHARGING_STATION_POSITION_Y);
-//                    if (dist_to_charging >= PARAMS::CHARGING_STATION_RANGE/2){
-//                        T prev_dist_to_charging = distance(device, agent_state.position[0], agent_state.position[1], PARAMS::CHARGING_STATION_POSITION_X, PARAMS::CHARGING_STATION_POSITION_Y);
-//                        if (dist_to_charging < prev_dist_to_charging) {
-//                            total_reward += charging_station_approach_reward;  // Reward for approaching charging when needed
-//                        }
-//                    } else{
-//                        T velocity = magnitude(device, agent_next_state.velocity[0], agent_next_state.velocity[1]);
-//                        T previous_velocity = magnitude(device, agent_state.velocity[0], agent_state.velocity[1]);
-//                        if(velocity < previous_velocity){
-//                            total_reward += charging_station_velocity_approach_reward;  // Reward for slowing down to charge in recharge range
-//                        }
-//                    }
-//                }
-            }
-        }
-
-        // Check if any drone currently detects the disaster
-        T detecting_count = 0;
-
-        std::vector<T> distances(N_AGENTS);
-        std::vector<TI> detecting_indices;
-
-        if (next_state.disaster.active) {
-            for (TI agent_i = 0; agent_i < N_AGENTS; ++agent_i) {
-                const auto &agent_next_state = next_state.drone_states[agent_i];
-                if (!agent_next_state.dead && agent_next_state.is_detecting) {
-                    distances[agent_i] = distance(device,
+            if(disaster_phase) {
+                // During disaster: simple distance-based reward to disaster location
+                if(agent_next_state.is_detecting) {
+                    T dist_to_disaster = distance(device,
                                                   agent_next_state.position[0], agent_next_state.position[1],
                                                   next_state.disaster.position[0], next_state.disaster.position[1]);
-                    detecting_indices.push_back(agent_i);
-                    detecting_count++;
+                    phi_raw = math::exp(device.math, -(dist_to_disaster * dist_to_disaster) / (T(2) * sigma * sigma));
                 }
-            }
-        }
-
-        // DISASTER DETECTION MODE - when disaster is detected
-        if (detecting_count > 0) {
-            // Base reward for detection
-            total_reward += single_agent_detection_reward * detecting_count;
-
-            // Proximity rewards - closer agents get higher rewards
-            for (TI agent_i : detecting_indices) {
-                T normalized_distance = distances[agent_i] / PARAMS::SENSOR_RANGE;
-                T proximity_factor = 1 - normalized_distance; // 1.0 at center, 0.0 at edge
-
-                // Quadratic reward for being closer to disaster center
-                total_reward += proximity_reward * proximity_factor * proximity_factor;
-            }
-
-            if (detecting_count >= 2) {
-                T formation_reward = 0;
-                for (size_t i = 0; i < detecting_indices.size(); ++i) {
-                    for (size_t j = i + 1; j < detecting_indices.size(); ++j) {
-                        TI agent_i = detecting_indices[i];
-                        TI agent_j = detecting_indices[j];
-
-                        T agent_distance = distance(device, next_state.drone_states[agent_i].position[0], next_state.drone_states[agent_i].position[1], next_state.drone_states[agent_j].position[0], next_state.drone_states[agent_j].position[1]);
-
-                        // Dynamic ideal separation based on number of detecting agents and formation geometry
-                        T detection_radius = PARAMS::SENSOR_RANGE * 0.75; // Assume agents position at 75% of sensor range
-                        T ideal_separation;
-
-                        if (detecting_count == 2) {
-                            // Special case: 2 agents should be on opposite sides
-                            ideal_separation = 2 * detection_radius; // Diameter = 7.5 units
-                        } else {
-                            // General case: evenly distributed around circumference
-                            ideal_separation = 2 * M_PI * detection_radius / detecting_count;
-                        }
-
-                        // For close agents, encourage minimum separation to avoid overcrowding
-                        T min_separation = PARAMS::SENSOR_RANGE * 0.3; // Minimum 30% of sensor range apart
-                        T actual_ideal = math::max(device.math, ideal_separation, min_separation);
-
-                        // Reward for maintaining good separation
-                        T separation_error = std::abs(agent_distance - actual_ideal);
-                        T max_error = PARAMS::SENSOR_RANGE;
-                        formation_reward += separation_reward * (1 - separation_error / max_error);
-                    }
-                }
-                total_reward += formation_reward;
-            }
-
-            // Strong bonus for complete swarm detection
-            if (detecting_count == alive_agents_count) {
-                total_reward += T(5.0);
+                // No frac_in calculation needed during disaster
             } else {
-                T missing_ratio = T(alive_agents_count - detecting_count) / T(alive_agents_count);
-                total_reward -= T(0.5) * missing_ratio;
-            }
-        } else if (next_state.disaster_detected_global && next_state.disaster.active) {
-            // CASE: Disaster active but not currently detected, was detected before
-            // Encourage moving toward the last known position
-
-            for (TI agent_i = 0; agent_i < N_AGENTS; ++agent_i) {
-                const auto &agent_next_state = next_state.drone_states[agent_i];
-                if (!agent_next_state.dead) {
-                    const auto &agent_state = state.drone_states[agent_i];
-                    T current_dist = distance(device, agent_next_state.position[0], agent_next_state.position[1], next_state.last_detected_disaster_position[0], next_state.last_detected_disaster_position[1]);
-                    T previous_dist = distance(device, agent_state.position[0], agent_state.position[1], state.last_detected_disaster_position[0], state.last_detected_disaster_position[1]);
-
-                    // Reward for moving toward last known position
-                    if (current_dist < previous_dist) {
-                        total_reward += disaster_approach_reward;
-                        // Alternative: quadratic scaling
-//                        T distance_improvement = previous_dist - current_dist;
-//                        T max_possible_improvement = math::sqrt(PARAMS::GRID_SIZE_X*PARAMS::GRID_SIZE_X + PARAMS::GRID_SIZE_Y * PARAMS::GRID_SIZE_Y);
-//                        T normalized_improvement = distance_improvement / max_possible_improvement;
-//                        total_reward += disaster_approach_reward * normalized_improvement * normalized_improvement; // Quadratic scaling
-                    }
-                }
-            }
-        } else {
-            // CASE: No disaster detected and never detected, OR disaster not active
-            // Exploration reward based on FOV coverage of high-priority areas
-
-            // Define high-priority areas with their boundary
-            // Platform center
-            T platform_min_x = cx - PARAMS::PLATFORM_HALF_SIZE;
-            T platform_max_x = cx + PARAMS::PLATFORM_HALF_SIZE;
-            T platform_min_y = cy - PARAMS::PLATFORM_HALF_SIZE;
-            T platform_max_y = cy + PARAMS::PLATFORM_HALF_SIZE;
-
-            // Horizontal pipes
-            T pipe_h_min_y = cy - PARAMS::PIPE_WIDTH / 2;
-            T pipe_h_max_y = cy + PARAMS::PIPE_WIDTH / 2;
-
-            // Vertical pipes
-            T pipe_v_min_x = cx - PARAMS::PIPE_WIDTH / 2;
-            T pipe_v_max_x = cx + PARAMS::PIPE_WIDTH / 2;
-
-            // Create a grid to track which cells are covered by any drone's FOV
-            const T grid_resolution = 20; // Higher number = more accurate but more computation
-            const T cell_size_x = PARAMS::GRID_SIZE_X / grid_resolution;
-            const T cell_size_y = PARAMS::GRID_SIZE_Y / grid_resolution;
-
-            // Initialize counters for covered cells in each priority area
-            TI platform_total_cells = 0;
-            TI platform_covered_cells = 0;
-            TI pipe_h_left_total_cells = 0;
-            TI pipe_h_left_covered_cells = 0;
-            TI pipe_h_right_total_cells = 0;
-            TI pipe_h_right_covered_cells = 0;
-            TI pipe_v_top_total_cells = 0;
-            TI pipe_v_top_covered_cells = 0;
-            TI pipe_v_bottom_total_cells = 0;
-            TI pipe_v_bottom_covered_cells = 0;
-
-            // Create a grid to track which cells are covered by FOV
-            std::vector<std::vector<bool>> covered_grid(grid_resolution, std::vector<bool>(grid_resolution, false));
-
-            // Mark cells covered by any drone's FOV
-            for (TI agent_i = 0; agent_i < N_AGENTS; ++agent_i) {
-                const auto &agent_next_state = next_state.drone_states[agent_i];
-                if (!agent_next_state.dead) {
-                    // Check all grid cells within the sensor range
-                    for (TI cell_x = 0; cell_x < grid_resolution; ++cell_x) {
-                        for (TI cell_y = 0; cell_y < grid_resolution; ++cell_y) {
-                            if(!covered_grid[cell_x][cell_y]) {
-                                // Calculate the center of this cell
-                                T cell_center_x = cell_size_x * (cell_x + 0.5);
-                                T cell_center_y = cell_size_y * (cell_y + 0.5);
-
-                                // Check if this cell is within the drone's FOV
-                                T distance_from_centre_of_cell = distance(device, cell_center_x, cell_center_y,
-                                                                          agent_next_state.position[0],
-                                                                          agent_next_state.position[1]);
-
-                                if (distance_from_centre_of_cell < PARAMS::SENSOR_RANGE) {
-                                    covered_grid[cell_x][cell_y] = true;
-                                }
-                            }
-                        }
-                    }
-                }
+                // During coverage: use platform+pipes structure (gaussian_potential)
+                phi_raw = gaussian_potential<DEVICE,PARAMS>(device,
+                                                            agent_next_state.position[0], agent_next_state.position[1], cx, cy, sigma);
+                frac_in = inbounds_fraction<DEVICE,PARAMS>(device,
+                                                           agent_next_state.position[0], agent_next_state.position[1]);
             }
 
-            // Count covered cells in each priority area
-            for (TI cell_x = 0; cell_x < grid_resolution; ++cell_x) {
-                for (TI cell_y = 0; cell_y < grid_resolution; ++cell_y) {
-                    // Calculate the center of this cell
-                    T cell_center_x = cell_size_x * (cell_x + 0.5);
-                    T cell_center_y = cell_size_y * (cell_y + 0.5);
-
-                    // Check which priority area this cell belongs to
-                    bool in_platform = (cell_center_x >= platform_min_x && cell_center_x <= platform_max_x &&
-                                        cell_center_y >= platform_min_y && cell_center_y <= platform_max_y);
-
-                    bool in_pipe_h = (cell_center_y >= pipe_h_min_y && cell_center_y <= pipe_h_max_y);
-                    bool in_pipe_h_left = in_pipe_h && (cell_center_x < cx);
-                    bool in_pipe_h_right = in_pipe_h && (cell_center_x > cx);
-
-                    bool in_pipe_v = (cell_center_x >= pipe_v_min_x && cell_center_x <= pipe_v_max_x);
-                    bool in_pipe_v_top = in_pipe_v && (cell_center_y > cy);
-                    bool in_pipe_v_bottom = in_pipe_v && (cell_center_y < cy);
-
-                    // Update counters based on coverage
-                    if (in_platform) {
-                        platform_total_cells++;
-                        if (covered_grid[cell_x][cell_y]) platform_covered_cells++;
-                    }
-
-                    if (in_pipe_h_left) {
-                        pipe_h_left_total_cells++;
-                        if (covered_grid[cell_x][cell_y]) pipe_h_left_covered_cells++;
-                    }
-
-                    if (in_pipe_h_right) {
-                        pipe_h_right_total_cells++;
-                        if (covered_grid[cell_x][cell_y]) pipe_h_right_covered_cells++;
-                    }
-
-                    if (in_pipe_v_top) {
-                        pipe_v_top_total_cells++;
-                        if (covered_grid[cell_x][cell_y]) pipe_v_top_covered_cells++;
-                    }
-
-                    if (in_pipe_v_bottom) {
-                        pipe_v_bottom_total_cells++;
-                        if (covered_grid[cell_x][cell_y]) pipe_v_bottom_covered_cells++;
-                    }
-                }
-            }
-
-            // Calculate coverage ratios for each area
-            T platform_coverage = (platform_total_cells > 0) ?
-                                  platform_covered_cells / platform_total_cells : 0;
-            T pipe_h_left_coverage = (pipe_h_left_total_cells > 0) ?
-                                     pipe_h_left_covered_cells / pipe_h_left_total_cells : 0;
-            T pipe_h_right_coverage = (pipe_h_right_total_cells > 0) ?
-                                      pipe_h_right_covered_cells / pipe_h_right_total_cells : 0;
-            T pipe_v_top_coverage = (pipe_v_top_total_cells > 0) ?
-                                    pipe_v_top_covered_cells / pipe_v_top_total_cells : 0;
-            T pipe_v_bottom_coverage = (pipe_v_bottom_total_cells > 0) ?
-                                       pipe_v_bottom_covered_cells / pipe_v_bottom_total_cells : 0;
-
-            // Calculate total priority area coverage
-            TI total_priority_cells = platform_total_cells + pipe_h_left_total_cells +
-                                      pipe_h_right_total_cells + pipe_v_top_total_cells +
-                                      pipe_v_bottom_total_cells;
-
-            TI total_covered_cells = platform_covered_cells + pipe_h_left_covered_cells +
-                                     pipe_h_right_covered_cells + pipe_v_top_covered_cells +
-                                     pipe_v_bottom_covered_cells;
-
-            T overall_coverage = (total_priority_cells > 0) ? T(total_covered_cells) / T(total_priority_cells) : 0;
-
-            // Assign rewards based on coverage ratios
-            total_reward += coverage_reward_total * overall_coverage;  // Overall coverage reward
-
-            // Update coverage metrics in next_state (only during exploration mode)
-            if (!detecting_count && !state.disaster_detected_global) {
-                // Copy previous values and add current measurement
-                next_state.metrics.total_coverage_ratio = state.metrics.total_coverage_ratio + overall_coverage;
-                next_state.metrics.coverage_measurement_count = state.metrics.coverage_measurement_count + 1;
-            } else {
-                // Just copy previous values when not in exploration mode
-                next_state.metrics.total_coverage_ratio = state.metrics.total_coverage_ratio;
-                next_state.metrics.coverage_measurement_count = state.metrics.coverage_measurement_count;
-            }
-
-            // Additional rewards for individual areas
-            total_reward += platform_coverage_reward * platform_coverage;     // Platform is most important
-            total_reward += pipe_coverage_reward * pipe_h_left_coverage;  // Pipe sections each get 0.6
-            total_reward += pipe_coverage_reward * pipe_h_right_coverage;
-            total_reward += pipe_coverage_reward * pipe_v_top_coverage;
-            total_reward += pipe_coverage_reward * pipe_v_bottom_coverage;
+            phi_sum += phi_raw * frac_in;
         }
 
-        if (next_state.disaster.active) {
-            if (next_state.disaster.position[0] < 0 ||
-                next_state.disaster.position[0] >= PARAMS::GRID_SIZE_X ||
-                next_state.disaster.position[1] < 0 ||
-                next_state.disaster.position[1] >= PARAMS::GRID_SIZE_Y) {
+        T reward_attr = PARAMS::GAUSS_BETA * phi_sum / T(N_AGENTS);
 
-                if (detecting_count > 0) {
-                    total_reward += T(2.0);
-                } else {
-                    total_reward -= T(5.0);
-                }
-            }
+/* ---------------------------------------------------------------
+   2.  Overlap penalty (discourage redundant coverage)
+   --------------------------------------------------------------- */
+        typename PARAMS::T pos_arr[N_AGENTS][2];
+        for(TI i=0;i<N_AGENTS;++i){
+            pos_arr[i][0] = next_state.drone_states[i].position[0];
+            pos_arr[i][1] = next_state.drone_states[i].position[1];
         }
+//        T overlap_alpha = disaster_phase ? PARAMS::OVERLAP_ALPHA * 0.2 : PARAMS::OVERLAP_ALPHA;
+        T penalty = PARAMS::OVERLAP_ALPHA *
+                    overlap_penalty<DEVICE,PARAMS>(device,pos_arr, disaster_phase) /
+                    T(N_AGENTS*(N_AGENTS-1)/2);
+
+/* ---------------------------------------------------------------
+   3.  Final per-agent reward
+   --------------------------------------------------------------- */
+        total_reward = reward_attr - penalty;
+
         utils::assert_exit(device, !math::is_nan(device.math, total_reward), "reward is nan");
 
-        return total_reward;
+        /* ---------- coverage metric bookkeeping (no reward impact) ------------- */
+        if(!next_state.disaster_detected_global)
+        {
+            T cov = priority_area_coverage<DEVICE,SPEC>(device, next_state);
+
+            next_state.metrics.total_coverage_ratio =
+                    state.metrics.total_coverage_ratio + cov;
+
+            next_state.metrics.coverage_measurement_count =
+                    state.metrics.coverage_measurement_count + 1;
+        }
+        else
+        {
+            /* keep previous counters unchanged */
+            next_state.metrics.total_coverage_ratio     =
+                    state.metrics.total_coverage_ratio;
+            next_state.metrics.coverage_measurement_count =
+                    state.metrics.coverage_measurement_count;
+        }
+/* ----------------------------------------------------------------------- */
+
+        return total_reward/N_AGENTS;
     }
 
     template<typename DEVICE, typename SPEC, typename OBS_SPEC, typename OBS_PARAMETERS, typename RNG>
@@ -909,6 +833,7 @@ namespace rl_tools {
         }
 
         if (!any_alive) {
+            log(device, device.logger, "All drones dead");
             terminate = true;
         }
 
@@ -925,8 +850,8 @@ namespace rl_tools {
         // LOG METRICS WHEN EPISODE TERMINATES
         if (terminate) {
             // Basic episode metrics
-            add_scalar(device, device.logger, "episode/total_steps", state.step_count);
-            add_scalar(device, device.logger, "episode/final_deaths", state.metrics.death_count);
+//            add_scalar(device, device.logger, "episode/total_steps", state.step_count);
+//            add_scalar(device, device.logger, "episode/final_deaths", state.metrics.death_count);
 
             // Coverage metrics
             if (state.metrics.coverage_measurement_count > 0) {
@@ -935,17 +860,43 @@ namespace rl_tools {
             }
             add_scalar(device, device.logger, "coverage/measurement_count", state.metrics.coverage_measurement_count);
 
-            add_scalar(device, device.logger, "disaster/active_steps", state.metrics.disaster_active_steps);
+            /* --- add potential-coverage diagnostics --- */
+            if (state.metrics.potential_steps > 0) {
+                T avg_step_pot = state.metrics.cumulative_potential_reward /
+                                 state.metrics.potential_steps;
+                add_scalar(device, device.logger,
+                           "potential/episode_cumulative",
+                           state.metrics.cumulative_potential_reward);
+                add_scalar(device, device.logger,
+                           "potential/episode_avg_per_step",
+                           avg_step_pot);
+            }
+
+            if (state.metrics.detection_count > 0) {
+                T avg_latency = static_cast<T>(state.metrics.cumulative_detection_latency) /
+                                state.metrics.detection_count;
+                add_scalar(device, device.logger,
+                           "disaster/avg_detection_latency",  avg_latency);
+            } else{
+                add_scalar(device, device.logger,
+                           "disaster/avg_detection_latency",  300);
+            }
+            add_scalar(device, device.logger,
+                       "disaster/events_detected", state.metrics.detection_count);
+
+
+
+//            add_scalar(device, device.logger, "disaster/active_steps", state.metrics.disaster_active_steps);
 
             // Charging behavior metrics
-            add_scalar(device, device.logger, "charging/total_sessions", state.metrics.total_charging_sessions);
-            add_scalar(device, device.logger, "charging/appropriate_sessions", state.metrics.appropriate_charging_count);
-            add_scalar(device, device.logger, "charging/inappropriate_sessions", state.metrics.inappropriate_charging_count);
+//            add_scalar(device, device.logger, "charging/total_sessions", state.metrics.total_charging_sessions);
+//            add_scalar(device, device.logger, "charging/appropriate_sessions", state.metrics.appropriate_charging_count);
+//            add_scalar(device, device.logger, "charging/inappropriate_sessions", state.metrics.inappropriate_charging_count);
 
-            if (state.metrics.total_charging_sessions > 0) {
-                T charging_efficiency = state.metrics.appropriate_charging_count / state.metrics.total_charging_sessions;
-                add_scalar(device, device.logger, "charging/efficiency", charging_efficiency);
-            }
+//            if (state.metrics.total_charging_sessions > 0) {
+//                T charging_efficiency = state.metrics.appropriate_charging_count / state.metrics.total_charging_sessions;
+//                add_scalar(device, device.logger, "charging/efficiency", charging_efficiency);
+//            }
 
             // Battery management metrics
             T total_battery = 0;
@@ -963,16 +914,16 @@ namespace rl_tools {
                 }
             }
 
-            if (alive_count > 0) {
-                add_scalar(device, device.logger, "battery/average_final", total_battery / alive_count);
-                add_scalar(device, device.logger, "battery/min_final", min_battery);
-                add_scalar(device, device.logger, "battery/max_final", max_battery);
-            }
-            add_scalar(device, device.logger, "agents/alive_at_end", alive_count);
+//            if (alive_count > 0) {
+//                add_scalar(device, device.logger, "battery/average_final", total_battery / alive_count);
+//                add_scalar(device, device.logger, "battery/min_final", min_battery);
+//                add_scalar(device, device.logger, "battery/max_final", max_battery);
+//            }
+//            add_scalar(device, device.logger, "agents/alive_at_end", alive_count);
 
             // Survival rate
             T survival_rate = alive_count / PARAMS::N_AGENTS;
-            add_scalar(device, device.logger, "agents/survival_rate", survival_rate);
+//            add_scalar(device, device.logger, "agents/survival_rate", survival_rate);
         }
 
         return terminate;

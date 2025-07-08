@@ -22,13 +22,11 @@ namespace rl_tools::rl::zoo::oil_platform_v1::sac {
 //            struct OPTIMIZER_PARAMETERS: nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<T>{
 //                static constexpr T ALPHA = 1e-3;
 //            };
-//            static constexpr bool NORMALIZE_OBSERVATIONS = true;
 
             struct SAC_PARAMETERS
                     : rl::algorithms::sac::DefaultParameters<T, TI, ENVIRONMENT::ACTION_DIM>
             {
-                static constexpr T GAMMA = 0.98;
-//                static constexpr T ACTION_ENTROPY_COEFFICIENT = 0.03; // Increased from default to encourage exploration
+                static constexpr T GAMMA = 0.95;
                 static constexpr TI N_EPOCHS = 1;
             };
 

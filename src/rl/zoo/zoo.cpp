@@ -149,9 +149,9 @@ struct LOOP_EVALUATION_PARAMETER_OVERWRITES: BASE{}; // no-op
 #error "RLtools Zoo: Algorithm not defined"
 #endif
 
-constexpr TI NUM_CHECKPOINTS = 10;
+constexpr TI NUM_CHECKPOINTS = 4;
 constexpr TI NUM_EVALUATIONS = 100;
-constexpr TI NUM_SAVE_TRAJECTORIES = 10;
+constexpr TI NUM_SAVE_TRAJECTORIES = 4;
 #ifdef RL_TOOLS_RL_ZOO_ALGORITHM_PPO
 static constexpr TI TIMING_INTERVAL = 10;
 #else

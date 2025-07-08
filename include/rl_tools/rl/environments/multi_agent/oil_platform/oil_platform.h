@@ -26,7 +26,7 @@ namespace rl_tools {
                         // Sensing & motion
                         static constexpr T SENSOR_RANGE = 5.0;
                         static constexpr T DT = 0.05;
-//                        static constexpr T MAX_ACCELERATION = 2.0;
+                        static constexpr T MAX_ACCELERATION = 2.0;
                         static constexpr T MAX_SPEED = 2.0;
 
                         // Geometry of platform & pipes
@@ -36,21 +36,84 @@ namespace rl_tools {
                         static constexpr TI GRID_SIZE_X = 20;
                         static constexpr TI GRID_SIZE_Y = 20;
 
+                        static constexpr TI GRID_RES = 20;
+
+
                         // Episode length
                         static constexpr TI EPISODE_STEP_LIMIT = 1000;
 
                         // Disaster parameters
                         static constexpr T DISASTER_MAX_SPEED = 0.5;
                         static constexpr TI DISASTER_MINIMUM_SPAWN_STEP = 200;
+                        static constexpr T DISASTER_PROBABILITY_SPAWN = 0.02;
 
                         // Charging parameters
                         static constexpr T CHARGING_RATE = 1.0;
-                        static constexpr T DISCHARGE_RATE = 0.15;
+//                        static constexpr T DISCHARGE_RATE = 0.15;
                         static constexpr T CHARGING_STATION_RANGE = 2.0;
                         static constexpr T CHARGING_VELOCITY_THRESHOLD = 0.5;
                         static constexpr T CHARGING_STATION_POSITION_X = 5.0;
                         static constexpr T CHARGING_STATION_POSITION_Y = 5.0;
                         // static constexpr T CHARGING_ACCELERATION_THRESHOLD = 0.5;
+
+                        static constexpr TI NOVELTY_WINDOW = 50;              // freshness horizon
+
+                        /* --- detection steepness constant ----------------------------------- */
+                        static constexpr T EPSILON_INSIDE = T(0.10) * SENSOR_RANGE;     // 10 % inside rim
+                        static constexpr T P0_DETECT      = T(0.95);                    // 95 % probability
+                        static constexpr T DETECTION_BETA =
+                                T( std::log(P0_DETECT / (T(1) - P0_DETECT)) ) / EPSILON_INSIDE;
+
+
+                        static constexpr T GAUSS_SIGMA_COVER = SENSOR_RANGE;          // pre-disaster
+                        static constexpr T GAUSS_SIGMA_EVENT = SENSOR_RANGE;    // post-spawn
+                        static constexpr T GAUSS_BETA        = 3.0;   // positive scale
+                        static constexpr T OVERLAP_RHO_COVERAGE       = SENSOR_RANGE * 0.5;
+                        static constexpr T OVERLAP_RHO_DETECTION       = SENSOR_RANGE * 0.3;
+                        static constexpr T OVERLAP_ALPHA     = 2.0;   // penalty scale
+
+
+                        struct Point { T x, y; };
+
+                        /* Worst-case capacity (all grid cells) */
+                        static constexpr TI ROI_CAP = GRID_RES * GRID_RES;
+
+                        /* constexpr builder returns BOTH the array and the final count   */
+                        static constexpr auto build_roi_catalogue()   // C++20 constexpr OK
+                        {
+                            std::array<Point, ROI_CAP> buf{};    // fixed-size storage
+                            TI n = 0;
+
+                            const T DX = T(GRID_SIZE_X) / GRID_RES;
+                            const T DY = T(GRID_SIZE_Y) / GRID_RES;
+                            const T CX = GRID_SIZE_X * T(0.5);
+                            const T CY = GRID_SIZE_Y * T(0.5);
+
+                            for (TI gx = 0; gx < GRID_RES; ++gx)
+                                for (TI gy = 0; gy < GRID_RES; ++gy)
+                                {
+                                    const T x = DX * (gx + T(0.5));
+                                    const T y = DY * (gy + T(0.5));
+
+                                    const T adx = std::abs(x - CX);
+                                    const T ady = std::abs(y - CY);
+
+                                    const bool in_plat  = (adx <= PLATFORM_HALF_SIZE && ady <= PLATFORM_HALF_SIZE);
+                                    const bool in_pipeh = (ady <= PIPE_WIDTH * 0.5 && adx >= PLATFORM_HALF_SIZE);
+                                    const bool in_pipev = (adx <= PIPE_WIDTH * 0.5 && ady >= PLATFORM_HALF_SIZE);
+
+                                    if (in_plat || in_pipeh || in_pipev)
+                                        buf[n++] = {x, y};
+                                }
+
+                            /* Return both data and the true filled size */
+                            return std::pair(buf, n);      // CTAD since C++17
+                        }
+
+                        /*  Store the result as two separate constexpr objects  */
+                        static constexpr auto ROI_DATA = build_roi_catalogue();
+                        static constexpr std::array<Point, ROI_CAP> ROI_CATALOGUE = ROI_DATA.first;
+                        static constexpr TI ROI_SIZE  = ROI_DATA.second;
                     };
 
                     template <typename T_PARAMETERS>
@@ -80,7 +143,7 @@ namespace rl_tools {
                         T velocity[2];
                     };
 
-                    template <typename T, typename TI>
+                    template <typename T, typename TI, typename PARAMS>
                     struct Metrics {
                         T total_coverage_ratio;
                         TI coverage_measurement_count;
@@ -89,6 +152,17 @@ namespace rl_tools {
                         TI appropriate_charging_count;
                         TI inappropriate_charging_count;
                         TI death_count;
+                        T  cumulative_potential_reward;                 // Σ r_t^{pot}
+                        TI potential_steps;                             // #steps accumulated
+                        TI cumulative_detection_latency;  // Σ first-detection latencies
+                        TI detection_count;  // # disasters that were spotted
+
+                        /* ───── new ───── */
+//                        bool covered_grid[PARAMS::GRID_RES][PARAMS::GRID_RES];  // bitmap of visited hi-priority cells
+//                        TI total_covered_cells;                       // scalar loggable metric
+//
+//                        TI visit_age_grid[PARAMS::GRID_RES][PARAMS::GRID_RES];   // steps since last visit
+
                     };
 
 
@@ -96,14 +170,16 @@ namespace rl_tools {
                     struct State {
                         using T = typename SPEC::T;
                         using TI = typename SPEC::TI;
+                        using PARAMS = typename SPEC::PARAMETERS;
 
                         DroneState<T, TI> drone_states[SPEC::PARAMETERS::N_AGENTS];
                         DisasterState<T> disaster;
-                        Metrics<T, TI> metrics;
+                        Metrics<T, TI, PARAMS> metrics;
                         bool disaster_detected_global;
                         T step_count;
                         T disaster_undetected_steps;
                         T last_detected_disaster_position[2];
+                        TI disaster_spawn_step;   // episode step index at spawn time
                     };
 
 
