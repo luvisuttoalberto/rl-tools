@@ -43,9 +43,14 @@ namespace rl_tools {
                         static constexpr TI EPISODE_STEP_LIMIT = 1000;
 
                         // Disaster parameters
-                        static constexpr T DISASTER_MAX_SPEED = 0.5;
-                        static constexpr TI DISASTER_MINIMUM_SPAWN_STEP = 200;
-                        static constexpr T DISASTER_PROBABILITY_SPAWN = 0.02;
+                        static constexpr T DISASTER_MAX_SPEED = 1.0;
+                        static constexpr TI DISASTER_MINIMUM_SPAWN_STEP = 0;
+                        static constexpr T DISASTER_PROBABILITY_SPAWN = 0.005;
+
+                        // --- new: stochastic drift controls -----------------------------------------
+                        static constexpr T DISASTER_TURN_MAX_RAD       = T(0.10);   // ≤~5.7° yaw jitter/step
+                        static constexpr T DISASTER_SPEED_JITTER_FRAC  = T(0.10);   // ±10% fractional speed jitter
+// ----------------------------------------------------------------------------
 
                         // Charging parameters
                         static constexpr T CHARGING_RATE = 1.0;
@@ -65,12 +70,29 @@ namespace rl_tools {
                                 T( std::log(P0_DETECT / (T(1) - P0_DETECT)) ) / EPSILON_INSIDE;
 
 
-                        static constexpr T GAUSS_SIGMA_COVER = SENSOR_RANGE;          // pre-disaster
-                        static constexpr T GAUSS_SIGMA_EVENT = SENSOR_RANGE;    // post-spawn
+                        static constexpr T GAUSS_SIGMA_COVER = SENSOR_RANGE/2;          // pre-disaster
+                        static constexpr T GAUSS_SIGMA_EVENT = SENSOR_RANGE/2;    // post-spawn
                         static constexpr T GAUSS_BETA        = 3.0;   // positive scale
                         static constexpr T OVERLAP_RHO_COVERAGE       = SENSOR_RANGE * 0.5;
                         static constexpr T OVERLAP_RHO_DETECTION       = SENSOR_RANGE * 0.3;
-                        static constexpr T OVERLAP_ALPHA     = 2.0;   // penalty scale
+                        static constexpr T OVERLAP_ALPHA     = 0.0;   // penalty scale
+
+
+                        // For time in cell approx
+                        static constexpr TI GRID_CELLS_X = 5; // Adjust based on your needs
+                        static constexpr TI GRID_CELLS_Y = 5;
+
+                        // Calculate expected time to cross a grid cell
+                        static constexpr T CELL_SIZE_X = T(GRID_SIZE_X) / T(GRID_CELLS_X);
+                        static constexpr T CELL_SIZE_Y = T(GRID_SIZE_Y) / T(GRID_CELLS_Y);
+                        static constexpr T CELL_DIAGONAL = std::sqrt(CELL_SIZE_X * CELL_SIZE_X + CELL_SIZE_Y * CELL_SIZE_Y);
+                        static constexpr T TIME_TO_CROSS_CELL = CELL_DIAGONAL / MAX_SPEED; // seconds
+                        static constexpr TI STEPS_TO_CROSS_CELL = static_cast<TI>(TIME_TO_CROSS_CELL / DT);
+
+                        // Set normalization based on "staying too long" - e.g., 3x the crossing time
+                        static constexpr TI MAX_STEPS_FOR_NORMALIZATION = STEPS_TO_CROSS_CELL * 3;
+
+                        static constexpr TI MINIMUM_COVERAGE_STEPS = 100;  // Minimum steps before disaster to count as valid coverage episode
 
 
                         struct Point { T x, y; };
@@ -121,7 +143,7 @@ namespace rl_tools {
                         using PARAMETERS = T_PARAMETERS;
                         using T = typename PARAMETERS::T;
                         using TI = typename PARAMETERS::TI;
-                        static constexpr TI PER_AGENT_DIM = 8; // pos(2), vel(2), battery (1), dead (1), is_charging (1), is_detecting(1)
+                        static constexpr TI PER_AGENT_DIM = 9; // pos(2), vel(2), battery (1), dead (1), is_charging (1), is_detecting(1), time_in_cell (1)
                         static constexpr TI SHARED_DIM = 5; // last_detected_disaster_pos(2), charging_station_pos(2), disaster_detected_global (1)
                         static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_DIM + SHARED_DIM;
                     };
@@ -134,6 +156,11 @@ namespace rl_tools {
                         bool dead;
                         bool is_charging;
                         bool is_detecting;
+
+                        // New grid tracking fields
+                        TI current_grid_x;
+                        TI current_grid_y;
+                        TI steps_in_current_cell;
                     };
 
                     template <typename T>

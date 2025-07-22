@@ -30,8 +30,8 @@ namespace rl_tools::rl::zoo::oil_platform_v1::sac {
                 static constexpr TI N_EPOCHS = 1;
             };
 
-            static constexpr TI STEP_LIMIT        = 2000000;
-            static constexpr TI REPLAY_BUFFER_CAP = 2000000;
+            static constexpr TI STEP_LIMIT        = 4000000;
+            static constexpr TI REPLAY_BUFFER_CAP = 4000000;
         };
 
         using LOOP_CORE_CONFIG = rlt::rl::algorithms::sac::loop::core::Config<

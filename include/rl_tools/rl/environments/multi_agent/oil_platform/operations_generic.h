@@ -33,21 +33,19 @@ namespace rl_tools {
 
     template<typename DEVICE, typename PARAMS, typename T, typename RNG>
     RL_TOOLS_FUNCTION_PLACEMENT static void sample_roi_position(
-            DEVICE& device, T& x, T& y, RNG& rng)
-    {
+            DEVICE &device, T &x, T &y, RNG &rng) {
         using TI = typename PARAMS::TI;
         TI idx = random::uniform_int_distribution(device.random, TI(0),
-                                                  PARAMS::ROI_SIZE-1, rng);
+                                                  PARAMS::ROI_SIZE - 1, rng);
         x = PARAMS::ROI_CATALOGUE[idx].x;
         y = PARAMS::ROI_CATALOGUE[idx].y;
     }
 
     template<typename DEVICE, typename PARAMS>
     RL_TOOLS_FUNCTION_PLACEMENT static
-    typename PARAMS::T inbounds_fraction(DEVICE& device,
+    typename PARAMS::T inbounds_fraction(DEVICE &device,
                                          typename PARAMS::T x,
-                                         typename PARAMS::T y)
-    {
+                                         typename PARAMS::T y) {
         using T = typename PARAMS::T;
         const T R = PARAMS::SENSOR_RANGE;
         /* distance to each wall */
@@ -58,19 +56,37 @@ namespace rl_tools {
 
         T f = T(1);               // full circle by default
         /* each wall cuts a circular segment if distance<R */
-        if(dxL < R) f -= math::pow(device.math, (R-dxL)/R, 2);
-        if(dxR < R) f -= math::pow(device.math, (R-dxR)/R, 2);
-        if(dyB < R) f -= math::pow(device.math, (R-dyB)/R, 2);
-        if(dyT < R) f -= math::pow(device.math, (R-dyT)/R, 2);
+        if (dxL < R) f -= math::pow(device.math, (R - dxL) / R, 2);
+        if (dxR < R) f -= math::pow(device.math, (R - dxR) / R, 2);
+        if (dyB < R) f -= math::pow(device.math, (R - dyB) / R, 2);
+        if (dyT < R) f -= math::pow(device.math, (R - dyT) / R, 2);
         return math::clamp(device.math, f, T(0), T(1));
     }
 
+    // Helper function to get grid cell from position
+    template<typename DEVICE, typename PARAMS, typename T>
+    RL_TOOLS_FUNCTION_PLACEMENT static void get_grid_cell(
+            DEVICE& device,
+            T x, T y,
+            typename PARAMS::TI& grid_x,
+            typename PARAMS::TI& grid_y
+    ) {
+        using TI = typename PARAMS::TI;
 
-    template <typename DEVICE, typename PARAMS, typename T>
-    RL_TOOLS_FUNCTION_PLACEMENT static T gaussian_potential(DEVICE& device,
-                       T px, T py,              // point to evaluate
-                       T cx, T cy,              // platform centre
-                       T sigma)                 // Gaussian width
+        // Clamp to grid boundaries
+        T norm_x = math::clamp(device.math, x / PARAMS::GRID_SIZE_X, T(0), T(0.999));
+        T norm_y = math::clamp(device.math, y / PARAMS::GRID_SIZE_Y, T(0), T(0.999));
+
+        grid_x = static_cast<TI>(norm_x * PARAMS::GRID_CELLS_X);
+        grid_y = static_cast<TI>(norm_y * PARAMS::GRID_CELLS_Y);
+    }
+
+
+    template<typename DEVICE, typename PARAMS, typename T>
+    RL_TOOLS_FUNCTION_PLACEMENT static T gaussian_potential(DEVICE &device,
+                                                            T px, T py,              // point to evaluate
+                                                            T cx, T cy,              // platform centre
+                                                            T sigma)                 // Gaussian width
     {
         T adx = math::abs(device.math, px - cx);
         T ady = math::abs(device.math, py - cy);
@@ -96,19 +112,21 @@ namespace rl_tools {
 
     template<typename DEVICE, typename PARAMS>
     RL_TOOLS_FUNCTION_PLACEMENT static
-    typename PARAMS::T overlap_penalty(DEVICE& device,
-                                       const typename PARAMS::T (&pos)[PARAMS::N_AGENTS][2], const bool disaster_phase)
-    {
-        using T  = typename PARAMS::T;
+    typename PARAMS::T overlap_penalty(DEVICE &device,
+                                       const typename PARAMS::T (&pos)[PARAMS::N_AGENTS][2],
+                                       const bool disaster_phase) {
+        using T = typename PARAMS::T;
         using TI = typename PARAMS::TI;
         T sum = 0;
-        for(TI i=0;i<PARAMS::N_AGENTS;++i){
-            for(TI j=i+1;j<PARAMS::N_AGENTS;++j){
-                T d = distance(device,pos[i][0],pos[i][1],pos[j][0],pos[j][1]);
-                if (disaster_phase){
-                    sum += math::exp(device.math, -(d*d)/(PARAMS::OVERLAP_RHO_DETECTION*PARAMS::OVERLAP_RHO_DETECTION));
-                } else{
-                    sum += math::exp(device.math, -(d*d)/(PARAMS::OVERLAP_RHO_COVERAGE*PARAMS::OVERLAP_RHO_COVERAGE));
+        for (TI i = 0; i < PARAMS::N_AGENTS; ++i) {
+            for (TI j = i + 1; j < PARAMS::N_AGENTS; ++j) {
+                T d = distance(device, pos[i][0], pos[i][1], pos[j][0], pos[j][1]);
+                if (disaster_phase) {
+                    sum += math::exp(device.math,
+                                     -(d * d) / (PARAMS::OVERLAP_RHO_DETECTION * PARAMS::OVERLAP_RHO_DETECTION));
+                } else {
+                    sum += math::exp(device.math,
+                                     -(d * d) / (PARAMS::OVERLAP_RHO_COVERAGE * PARAMS::OVERLAP_RHO_COVERAGE));
                 }
             }
         }
@@ -117,31 +135,29 @@ namespace rl_tools {
 
     /* --- helper: logistic sigmoid ----------------------------------------- */
     template<typename DEVICE, typename T>
-    RL_TOOLS_FUNCTION_PLACEMENT static T logistic(DEVICE& device, T x)
-    {
+    RL_TOOLS_FUNCTION_PLACEMENT static T logistic(DEVICE &device, T x) {
         return T(1) / (T(1) + math::exp(device.math, -x));
     }
 
     /* ---------- helper: one-shot coverage ratio over high-priority areas --- */
     template<typename DEVICE, typename SPEC>
     RL_TOOLS_FUNCTION_PLACEMENT static typename SPEC::T
-    priority_area_coverage(DEVICE& device,
-                           const typename SPEC::STATE& s_next)
-    {
-        using T      = typename SPEC::T;
-        using TI     = typename SPEC::TI;
+    priority_area_coverage(DEVICE &device,
+                           const typename SPEC::STATE &s_next) {
+        using T = typename SPEC::T;
+        using TI = typename SPEC::TI;
         using PARAMS = typename SPEC::PARAMETERS;
-        constexpr TI N     = PARAMS::N_AGENTS;
-        constexpr TI RES   = PARAMS::GRID_RES;          // 20
-        constexpr T  DX    = T(PARAMS::GRID_SIZE_X) / RES;
-        constexpr T  DY    = T(PARAMS::GRID_SIZE_Y) / RES;
-        constexpr T  CX    = PARAMS::GRID_SIZE_X * T(0.5);
-        constexpr T  CY    = PARAMS::GRID_SIZE_Y * T(0.5);
+        constexpr TI N = PARAMS::N_AGENTS;
+        constexpr TI RES = PARAMS::GRID_RES;          // 20
+        constexpr T DX = T(PARAMS::GRID_SIZE_X) / RES;
+        constexpr T DY = T(PARAMS::GRID_SIZE_Y) / RES;
+        constexpr T CX = PARAMS::GRID_SIZE_X * T(0.5);
+        constexpr T CY = PARAMS::GRID_SIZE_Y * T(0.5);
 
         /* platform & pipe masks pre-computed once */
         TI total_priority = 0, covered_priority = 0;
-        for (TI gx = 0; gx < RES; ++gx){
-            for (TI gy = 0; gy < RES; ++gy){
+        for (TI gx = 0; gx < RES; ++gx) {
+            for (TI gy = 0; gy < RES; ++gy) {
                 T cx_cell = DX * (gx + T(0.5));
                 T cy_cell = DY * (gy + T(0.5));
 
@@ -155,26 +171,24 @@ namespace rl_tools {
                                   std::abs(cy_cell - CY) >= PARAMS::PLATFORM_HALF_SIZE);
 
                 bool is_priority = in_platform || in_pipe_h || in_pipe_v;
-                if(!is_priority) continue;
+                if (!is_priority) continue;
                 ++total_priority;
 
                 /* covered if ANY live drone has the cell centre within sensor range */
-                for (TI i = 0; i < N; ++i){
-                    const auto& d = s_next.drone_states[i];
-                    if(d.dead) continue;
-                    T dist = (d.position[0]-cx_cell)*(d.position[0]-cx_cell)
-                             + (d.position[1]-cy_cell)*(d.position[1]-cy_cell);
-                    if(dist <= PARAMS::SENSOR_RANGE*PARAMS::SENSOR_RANGE){
+                for (TI i = 0; i < N; ++i) {
+                    const auto &d = s_next.drone_states[i];
+                    if (d.dead) continue;
+                    T dist = (d.position[0] - cx_cell) * (d.position[0] - cx_cell)
+                             + (d.position[1] - cy_cell) * (d.position[1] - cy_cell);
+                    if (dist <= PARAMS::SENSOR_RANGE * PARAMS::SENSOR_RANGE) {
                         ++covered_priority;
                         break;
                     }
                 }
             }
         }
-        return (total_priority>0) ? T(covered_priority)/T(total_priority) : T(0);
+        return (total_priority > 0) ? T(covered_priority) / T(total_priority) : T(0);
     }
-
-
 
 
     template<typename DEVICE, typename SPEC>
@@ -224,6 +238,8 @@ namespace rl_tools {
     ) {
         using T = typename SPEC::T;
         using TI = typename SPEC::TI;
+        using PARAMS = typename SPEC::PARAMETERS;
+
 
         // Initialize all drone states
         for (TI agent_i = 0; agent_i < SPEC::PARAMETERS::N_AGENTS; agent_i++) {
@@ -236,6 +252,14 @@ namespace rl_tools {
             agent_state.dead = false;
             agent_state.is_charging = false;
             agent_state.is_detecting = false;
+
+            // Initialize grid tracking
+            get_grid_cell<DEVICE, PARAMS>(device,
+                                          agent_state.position[0],
+                                          agent_state.position[1],
+                                          agent_state.current_grid_x,
+                                          agent_state.current_grid_y);
+            agent_state.steps_in_current_cell = 0;
         }
 
         state.disaster.active = false;
@@ -261,9 +285,9 @@ namespace rl_tools {
         state.metrics.cumulative_potential_reward = 0;
         state.metrics.potential_steps = 0;
 
-        state.disaster_spawn_step  = 0;
+        state.disaster_spawn_step = 0;
         state.metrics.cumulative_detection_latency = 0;
-        state.metrics.detection_count              = 0;
+        state.metrics.detection_count = 0;
 
         /* ───── initialise coverage bookkeeping ───── */
 //        state.metrics.total_covered_cells = 0;
@@ -284,6 +308,8 @@ namespace rl_tools {
     ) {
         using T = typename SPEC::T;
         using TI = typename SPEC::TI;
+        using PARAMS = typename SPEC::PARAMETERS;
+
 
         // Initialize all drone states
         for (TI agent_i = 0; agent_i < SPEC::PARAMETERS::N_AGENTS; agent_i++) {
@@ -296,6 +322,14 @@ namespace rl_tools {
             agent_state.dead = false;
             agent_state.is_charging = false;
             agent_state.is_detecting = false;
+
+            // Initialize grid tracking
+            get_grid_cell<DEVICE, PARAMS>(device,
+                                                    agent_state.position[0],
+                                                    agent_state.position[1],
+                                                    agent_state.current_grid_x,
+                                                    agent_state.current_grid_y);
+            agent_state.steps_in_current_cell = 0;
         }
 
         // Disaster state
@@ -322,9 +356,9 @@ namespace rl_tools {
         state.metrics.cumulative_potential_reward = 0;
         state.metrics.potential_steps = 0;
 
-        state.disaster_spawn_step  = 0;
+        state.disaster_spawn_step = 0;
         state.metrics.cumulative_detection_latency = 0;
-        state.metrics.detection_count              = 0;
+        state.metrics.detection_count = 0;
 
 //        /* ───── initialise coverage bookkeeping ───── */
 //        state.metrics.total_covered_cells = 0;
@@ -350,7 +384,7 @@ namespace rl_tools {
     template<typename DEVICE, typename SPEC, typename ACTION_SPEC, typename RNG>
     RL_TOOLS_FUNCTION_PLACEMENT static typename SPEC::T step(
             DEVICE &device,
-            const rl::environments::multi_agent::OilPlatform<SPEC> & env,
+            const rl::environments::multi_agent::OilPlatform<SPEC> &env,
             const typename rl::environments::multi_agent::OilPlatform<SPEC>::Parameters &parameters,
             const typename rl::environments::multi_agent::OilPlatform<SPEC>::State &state,
             const Matrix<ACTION_SPEC> &action,
@@ -371,17 +405,22 @@ namespace rl_tools {
 
         // (1) Disaster: 2% to start in any HIGH‑PRIORITY area, remains static once created
         if (!state.disaster.active) {
-            if (state.step_count >= PARAMS::DISASTER_MINIMUM_SPAWN_STEP && random::uniform_real_distribution(device.random, T(0), T(1), rng) < T(PARAMS::DISASTER_PROBABILITY_SPAWN)) {
+            if (state.step_count >= PARAMS::DISASTER_MINIMUM_SPAWN_STEP &&
+                random::uniform_real_distribution(device.random, T(0), T(1), rng) <
+                T(PARAMS::DISASTER_PROBABILITY_SPAWN)) {
                 T x, y;
-                sample_roi_position<DEVICE,PARAMS>(device,x,y,rng);
+                sample_roi_position<DEVICE, PARAMS>(device, x, y, rng);
                 next_state.disaster.active = true;
                 next_state.disaster.position[0] = x;
                 next_state.disaster.position[1] = y;
 
                 // Generate random velocity for the disaster
                 T angle = random::uniform_real_distribution(device.random, T(0), T(2 * M_PI), rng);
-                next_state.disaster.velocity[0] = PARAMS::DISASTER_MAX_SPEED * math::cos(device.math, angle);
-                next_state.disaster.velocity[1] = PARAMS::DISASTER_MAX_SPEED * math::sin(device.math, angle);
+                T speed = random::uniform_real_distribution(device.random, T(0), T(PARAMS::DISASTER_MAX_SPEED), rng);
+//                next_state.disaster.velocity[0] = PARAMS::DISASTER_MAX_SPEED * math::cos(device.math, angle);
+//                next_state.disaster.velocity[1] = PARAMS::DISASTER_MAX_SPEED * math::sin(device.math, angle);
+                next_state.disaster.velocity[0] = speed * math::cos(device.math, angle);
+                next_state.disaster.velocity[1] = speed * math::sin(device.math, angle);
                 next_state.disaster_spawn_step = state.step_count;   // mark this step
             } else {
                 next_state.disaster_spawn_step = state.disaster_spawn_step;
@@ -392,13 +431,82 @@ namespace rl_tools {
                 next_state.disaster.velocity[1] = state.disaster.velocity[1];
             }
         } else {
-            // MODIFIED: Update disaster position based on velocity
+//            // MODIFIED: Update disaster position based on velocity
+//            next_state.disaster.active = true;
+//            next_state.disaster.position[0] = state.disaster.position[0] + state.disaster.velocity[0] * PARAMS::DT;
+//            next_state.disaster.position[1] = state.disaster.position[1] + state.disaster.velocity[1] * PARAMS::DT;
+//            next_state.disaster.velocity[0] = state.disaster.velocity[0];
+//            next_state.disaster.velocity[1] = state.disaster.velocity[1];
+//            next_state.disaster_spawn_step = state.disaster_spawn_step;
+
+            /* ────────────────────────────────────────────────────────────────────
+               Disaster wandering update
+               - Start from previous velocity
+               - Apply small random angular jitter
+               - Apply small random speed jitter (fractional)
+               - Clamp to [0, DISASTER_MAX_SPEED]
+               - Integrate forward
+               ──────────────────────────────────────────────────────────────────── */
             next_state.disaster.active = true;
-            next_state.disaster.position[0] = state.disaster.position[0] + state.disaster.velocity[0] * PARAMS::DT;
-            next_state.disaster.position[1] = state.disaster.position[1] + state.disaster.velocity[1] * PARAMS::DT;
-            next_state.disaster.velocity[0] = state.disaster.velocity[0];
-            next_state.disaster.velocity[1] = state.disaster.velocity[1];
             next_state.disaster_spawn_step = state.disaster_spawn_step;
+
+            // Current velocity
+            T vx = state.disaster.velocity[0];
+            T vy = state.disaster.velocity[1];
+
+            // Current speed
+            T vmag = magnitude(device, vx, vy);
+
+            // If zero (can happen if spawned with 0 speed), nudge to tiny random dir
+            if (vmag <= T(1e-6)) {
+                T ang0 = random::uniform_real_distribution(device.random, T(0), T(2 * M_PI), rng);
+                vx = math::cos(device.math, ang0) * PARAMS::DISASTER_MAX_SPEED * T(0.25);
+                vy = math::sin(device.math, ang0) * PARAMS::DISASTER_MAX_SPEED * T(0.25);
+                vmag = magnitude(device, vx, vy);
+            }
+
+            // ---- small random heading change ----
+            T dtheta = random::uniform_real_distribution(device.random,
+                                                         -PARAMS::DISASTER_TURN_MAX_RAD,
+                                                         +PARAMS::DISASTER_TURN_MAX_RAD,
+                                                         rng);
+            T c = math::cos(device.math, dtheta);
+            T s = math::sin(device.math, dtheta);
+            T vx_r = vx * c - vy * s;
+            T vy_r = vx * s + vy * c;
+
+            // ---- small random speed jitter (fraction of current speed cap) ----
+            // jitter range scaled to MAX_SPEED (not current speed) so a stopped disaster can re-accelerate a bit
+            T dv_frac = random::uniform_real_distribution(device.random,
+                                                          -PARAMS::DISASTER_SPEED_JITTER_FRAC,
+                                                          +PARAMS::DISASTER_SPEED_JITTER_FRAC,
+                                                          rng);
+            T speed_target = vmag + dv_frac * PARAMS::DISASTER_MAX_SPEED;
+
+            // clamp to [0, MAX]
+            speed_target = math::clamp(device.math, speed_target, T(0), PARAMS::DISASTER_MAX_SPEED);
+
+            // renormalize rotated velocity to speed_target
+            T vmag_r = magnitude(device, vx_r, vy_r);
+            if (vmag_r > T(1e-6)) {
+                T scale = speed_target / vmag_r;
+                vx_r *= scale;
+                vy_r *= scale;
+            } else {
+                // degenerate (shouldn’t happen), just re-sample a dir at target speed
+                T ang_resamp = random::uniform_real_distribution(device.random, T(0), T(2 * M_PI), rng);
+                vx_r = math::cos(device.math, ang_resamp) * speed_target;
+                vy_r = math::sin(device.math, ang_resamp) * speed_target;
+            }
+
+            // ---- integrate forward ----
+            T new_x = state.disaster.position[0] + vx_r * PARAMS::DT;
+            T new_y = state.disaster.position[1] + vy_r * PARAMS::DT;
+
+            next_state.disaster.position[0] = new_x;
+            next_state.disaster.position[1] = new_y;
+            next_state.disaster.velocity[0] = vx_r;
+            next_state.disaster.velocity[1] = vy_r;
         }
 
         // (2) Per-drone update for position and velocity
@@ -471,6 +579,36 @@ namespace rl_tools {
 
             } else {
                 agent_next_state = agent_state;
+            }
+        }
+
+        // After updating positions, update grid tracking
+        for (TI agent_i = 0; agent_i < PARAMS::N_AGENTS; agent_i++) {
+            auto &agent_next_state = next_state.drone_states[agent_i];
+            const auto &agent_state = state.drone_states[agent_i];
+
+            if (!agent_next_state.dead) {
+                // Get new grid cell
+                TI new_grid_x, new_grid_y;
+                get_grid_cell<DEVICE, PARAMS>(device,
+                                              agent_next_state.position[0],
+                                              agent_next_state.position[1],
+                                              new_grid_x,
+                                              new_grid_y);
+
+                // Check if drone moved to a new cell
+                if (new_grid_x != agent_state.current_grid_x ||
+                    new_grid_y != agent_state.current_grid_y) {
+                    // Reset counter
+                    agent_next_state.current_grid_x = new_grid_x;
+                    agent_next_state.current_grid_y = new_grid_y;
+                    agent_next_state.steps_in_current_cell = 0;
+                } else {
+                    // Increment counter
+                    agent_next_state.current_grid_x = agent_state.current_grid_x;
+                    agent_next_state.current_grid_y = agent_state.current_grid_y;
+                    agent_next_state.steps_in_current_cell = agent_state.steps_in_current_cell + 1;
+                }
             }
         }
 
@@ -722,7 +860,7 @@ namespace rl_tools {
             phi_sum += phi_raw * frac_in;
         }
 
-        T reward_attr = PARAMS::GAUSS_BETA * phi_sum / T(N_AGENTS);
+        T reward_attr = PARAMS::GAUSS_BETA * phi_sum;
 
 /* ---------------------------------------------------------------
    2.  Overlap penalty (discourage redundant coverage)
@@ -732,11 +870,19 @@ namespace rl_tools {
             pos_arr[i][0] = next_state.drone_states[i].position[0];
             pos_arr[i][1] = next_state.drone_states[i].position[1];
         }
+        T penalty = 0;
 //        T overlap_alpha = disaster_phase ? PARAMS::OVERLAP_ALPHA * 0.2 : PARAMS::OVERLAP_ALPHA;
-        T penalty = PARAMS::OVERLAP_ALPHA *
-                    overlap_penalty<DEVICE,PARAMS>(device,pos_arr, disaster_phase) /
-                    T(N_AGENTS*(N_AGENTS-1)/2);
+        if (!next_state.disaster_detected_global) {
+//            if (!disaster_phase) {
+            penalty = reward_attr *
+                        overlap_penalty<DEVICE, PARAMS>(device, pos_arr, disaster_phase) /
+                        T(N_AGENTS * (N_AGENTS - 1) / 2);
+        }
 
+        if(disaster_phase && !next_state.disaster_detected_global){
+            T temporal_penalty = (next_state.step_count - next_state.disaster_spawn_step)/(PARAMS::EPISODE_STEP_LIMIT - next_state.disaster_spawn_step);
+            reward_attr -= temporal_penalty;
+        }
 /* ---------------------------------------------------------------
    3.  Final per-agent reward
    --------------------------------------------------------------- */
@@ -795,6 +941,13 @@ namespace rl_tools {
             set(observation, 0, agent_i * PER_AGENT_OBS_DIM + 5, 2 * (agent_state.battery / 100) - 1);
             set(observation, 0, agent_i * PER_AGENT_OBS_DIM + 6, agent_state.dead ? 1 : -1);
             set(observation, 0, agent_i * PER_AGENT_OBS_DIM + 7, agent_state.dead ? -1 : agent_state.is_charging ? 1 : -1);
+
+            // New: Normalized time in cell
+            // Option 1: Linear with clipping to [-1, 1]
+            T normalized_time = agent_state.dead ? T(-1) :
+                                T(2) * math::min(device.math, T(agent_state.steps_in_current_cell) / T(PARAMS::MAX_STEPS_FOR_NORMALIZATION), T(1)) - T(1);
+
+            set(observation, 0, agent_i * PER_AGENT_OBS_DIM + 8, normalized_time);
         }
 
         TI shared_offset = PARAMS::N_AGENTS * PER_AGENT_OBS_DIM;
@@ -848,17 +1001,33 @@ namespace rl_tools {
         }
 
         // LOG METRICS WHEN EPISODE TERMINATES
-        if (terminate) {
+        if (terminate || state.step_count == PARAMS::EPISODE_STEP_LIMIT) {
             // Basic episode metrics
 //            add_scalar(device, device.logger, "episode/total_steps", state.step_count);
 //            add_scalar(device, device.logger, "episode/final_deaths", state.metrics.death_count);
 
-            // Coverage metrics
-            if (state.metrics.coverage_measurement_count > 0) {
-                T average_coverage = state.metrics.total_coverage_ratio / state.metrics.coverage_measurement_count;
-                add_scalar(device, device.logger, "coverage/average_priority_area_coverage", average_coverage);
+//            // Coverage metrics
+//            if (state.metrics.coverage_measurement_count > 0) {
+//                T average_coverage = state.metrics.total_coverage_ratio / state.metrics.coverage_measurement_count;
+//                add_scalar(device, device.logger, "coverage/average_priority_area_coverage", average_coverage);
+//            }
+//            add_scalar(device, device.logger, "coverage/measurement_count", state.metrics.coverage_measurement_count);
+
+            // Only log if disaster never spawned or spawned after minimum coverage time
+            bool had_enough_coverage_time = !state.disaster.active ||
+                                            (state.disaster_spawn_step >= PARAMS::MINIMUM_COVERAGE_STEPS);
+
+            if (had_enough_coverage_time) {
+                if (state.metrics.coverage_measurement_count > 0) {
+                    T average_coverage = state.metrics.total_coverage_ratio / state.metrics.coverage_measurement_count;
+                    add_scalar(device, device.logger, "coverage/average_priority_area_coverage", average_coverage);
+                }
+                add_scalar(device, device.logger, "coverage/measurement_count", state.metrics.coverage_measurement_count);
             }
-            add_scalar(device, device.logger, "coverage/measurement_count", state.metrics.coverage_measurement_count);
+
+            // Always log when disaster spawned (or episode length if no disaster)
+            TI coverage_only_steps = state.disaster.active ? state.disaster_spawn_step : state.step_count;
+            add_scalar(device, device.logger, "coverage/coverage_only_steps", coverage_only_steps);
 
             /* --- add potential-coverage diagnostics --- */
             if (state.metrics.potential_steps > 0) {
