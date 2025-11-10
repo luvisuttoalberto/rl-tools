@@ -44,6 +44,8 @@
 #include "l2f/td3.h"
 #include "l2f/ppo.h"
 #include "oil_platform-v1/sac.h"
+#include "oil_platform-v1/sac_hierarchical.h"
+#include "oil_platform-v1/ppo_multi_agent.h"
 #ifdef RL_TOOLS_RL_ZOO_ENVIRONMENT_ANT_V4
 #include "ant-v4/ppo.h"
 #include "ant-v4/td3.h"
@@ -103,7 +105,15 @@ using LOOP_CORE_CONFIG = rlt::rl::zoo::l2f::sac::FACTORY<DEVICE, T, TI, RNG>::LO
 template <typename BASE>
 struct LOOP_EVALUATION_PARAMETER_OVERWRITES: BASE{};
 #elif defined(RL_TOOLS_RL_ZOO_ENVIRONMENT_OIL_PLATFORM)
+#ifdef RL_TOOLS_USE_HIERARCHICAL_SAC
+using LOOP_CORE_CONFIG = rlt::rl::zoo::oil_platform_v1::sac_hierarchical::FACTORY<DEVICE, T, TI, RNG>::LOOP_CORE_CONFIG;
+//#elif defined(RL_TOOLS_USE_MULTI_AGENT_SAC)
+//using LOOP_CORE_CONFIG = rlt::rl::zoo::oil_platform_v1::sac_multi_agent::FACTORY<DEVICE, T, TI, RNG>::LOOP_CORE_CONFIG;
+#elif defined(RL_TOOLS_USE_MULTI_AGENT_PPO)
+using LOOP_CORE_CONFIG = rlt::rl::zoo::oil_platform_v1::ppo_multi_agent::FACTORY<DEVICE, T, TI, RNG>::LOOP_CORE_CONFIG;
+#else
 using LOOP_CORE_CONFIG = rlt::rl::zoo::oil_platform_v1::sac::FACTORY<DEVICE, T, TI, RNG>::LOOP_CORE_CONFIG;
+#endif
 template <typename BASE>
 struct LOOP_EVALUATION_PARAMETER_OVERWRITES: BASE{};
 #else
@@ -140,6 +150,10 @@ template <typename BASE>
 struct LOOP_EVALUATION_PARAMETER_OVERWRITES: BASE{}; // no-op
 #elif defined(RL_TOOLS_RL_ZOO_ENVIRONMENT_L2F)
 using LOOP_CORE_CONFIG = rlt::rl::zoo::l2f::ppo::FACTORY<DEVICE, T, TI, RNG>::LOOP_CORE_CONFIG;
+template <typename BASE>
+struct LOOP_EVALUATION_PARAMETER_OVERWRITES: BASE{}; // no-op
+#elif defined(RL_TOOLS_RL_ZOO_ENVIRONMENT_OIL_PLATFORM)
+using LOOP_CORE_CONFIG = rlt::rl::zoo::oil_platform_v1::ppo_multi_agent::FACTORY<DEVICE, T, TI, RNG>::LOOP_CORE_CONFIG;
 template <typename BASE>
 struct LOOP_EVALUATION_PARAMETER_OVERWRITES: BASE{}; // no-op
 #else
@@ -203,7 +217,13 @@ std::string environment = "ant-v4";
 #elif defined(RL_TOOLS_RL_ZOO_ENVIRONMENT_L2F)
 std::string environment = "l2f";
 #elif defined(RL_TOOLS_RL_ZOO_ENVIRONMENT_OIL_PLATFORM)
+#ifdef RL_TOOLS_USE_HIERARCHICAL_SAC
+std::string environment = "oil_platform-v1_hierarchical";
+#elif defined(RL_TOOLS_USE_MULTI_AGENT_PPO)
+std::string environment = "oil_platform-v1_multi_agent_ppo";
+#else
 std::string environment = "oil_platform-v1";
+#endif
 #else
 #error "RLtools Zoo: Environment not defined"
 #endif

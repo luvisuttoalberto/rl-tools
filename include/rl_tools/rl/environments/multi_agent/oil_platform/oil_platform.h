@@ -20,6 +20,9 @@ namespace rl_tools {
                     struct DefaultParameters {
                         using T = T_T;
                         using TI = T_TI;
+
+                        static constexpr bool BATTERY_ENABLED = true;
+                        static constexpr bool OVERLAP_REPULSION_ACTIVE = false;
                         // Number of drones
                         static constexpr TI N_AGENTS = 3;
 
@@ -45,7 +48,7 @@ namespace rl_tools {
                         // Disaster parameters
                         static constexpr T DISASTER_MAX_SPEED = 1.0;
                         static constexpr TI DISASTER_MINIMUM_SPAWN_STEP = 0;
-                        static constexpr T DISASTER_PROBABILITY_SPAWN = 0.005;
+                        static constexpr T DISASTER_PROBABILITY_SPAWN = 0.01;
 
                         // --- new: stochastic drift controls -----------------------------------------
                         static constexpr T DISASTER_TURN_MAX_RAD       = T(0.10);   // ≤~5.7° yaw jitter/step
@@ -56,10 +59,14 @@ namespace rl_tools {
                         static constexpr T CHARGING_RATE = 1.0;
 //                        static constexpr T DISCHARGE_RATE = 0.15;
                         static constexpr T CHARGING_STATION_RANGE = 2.0;
-                        static constexpr T CHARGING_VELOCITY_THRESHOLD = 0.5;
+                        static constexpr T CHARGING_VELOCITY_THRESHOLD = 0.75;
                         static constexpr T CHARGING_STATION_POSITION_X = 5.0;
                         static constexpr T CHARGING_STATION_POSITION_Y = 5.0;
+                        static constexpr T MINIMUM_BATTERY_FOR_CHARGING = 80.0;
                         // static constexpr T CHARGING_ACCELERATION_THRESHOLD = 0.5;
+
+                        // Minimum number of consecutive steps a drone must remain charging
+                        static constexpr TI MIN_CHARGE_STEPS = 70;
 
                         static constexpr TI NOVELTY_WINDOW = 50;              // freshness horizon
 
@@ -72,10 +79,13 @@ namespace rl_tools {
 
                         static constexpr T GAUSS_SIGMA_COVER = SENSOR_RANGE/2;          // pre-disaster
                         static constexpr T GAUSS_SIGMA_EVENT = SENSOR_RANGE/2;    // post-spawn
-                        static constexpr T GAUSS_BETA        = 3.0;   // positive scale
-                        static constexpr T OVERLAP_RHO_COVERAGE       = SENSOR_RANGE * 0.5;
-                        static constexpr T OVERLAP_RHO_DETECTION       = SENSOR_RANGE * 0.3;
-                        static constexpr T OVERLAP_ALPHA     = 0.0;   // penalty scale
+                        static constexpr T GAUSS_BETA_COVER        = 1.0;   //Coverage reward
+                        static constexpr T GAUSS_BETA_EVENT        = 1.0;  // Disaster detection reward
+                        
+                        // Agent distribution (repulsion) parameters
+                        static constexpr T OVERLAP_RHO_COVERAGE       = SENSOR_RANGE;        // Larger spacing during coverage (5.0)
+                        static constexpr T OVERLAP_RHO_DETECTION       = SENSOR_RANGE * 0.3;  // Tighter spacing around disaster (1.5)
+                        static constexpr T REPULSION_BETA              = 0.3;                 // Penalty scale (increased from 0.5, no normalization)
 
 
                         // For time in cell approx
@@ -93,6 +103,105 @@ namespace rl_tools {
                         static constexpr TI MAX_STEPS_FOR_NORMALIZATION = STEPS_TO_CROSS_CELL * 3;
 
                         static constexpr TI MINIMUM_COVERAGE_STEPS = 100;  // Minimum steps before disaster to count as valid coverage episode
+
+                        // Battery and charging parameters
+                        static constexpr T DISCHARGE_RATE = 0.15;
+                        static constexpr T GAUSS_SIGMA_CHARGING = CHARGING_STATION_RANGE*4;
+                        static constexpr T GAUSS_BETA_CHARGING = 1.0;
+                        static constexpr T BATTERY_URGENCY_K = 1.0;
+                        static constexpr T DEATH_PENALTY = -10.0;
+                        
+                        // Movement cost parameters
+                        static constexpr T MOVEMENT_COST_COEFFICIENT = 0.12;  // Cost per unit of speed
+//                        static constexpr T MOVEMENT_COST_COEFFICIENT = 0.03;  // Cost per unit of speed
+
+                        // ---- Multi-center Gaussian reward (platform + 4 arms) -----------------
+
+// World half-sizes (derived from your 0..GRID_SIZE box)
+                        static constexpr T WORLD_HALF_X = T(GRID_SIZE_X) * T(0.5);
+                        static constexpr T WORLD_HALF_Y = T(GRID_SIZE_Y) * T(0.5);
+
+// Placement of arm centers: distance from platform edge toward the boundary.
+// κ = 0.5  ⇒ place arm centers roughly midway from platform edge to boundary.
+                        static constexpr T PIPE_CENTER_FRACTION = T(0.5);
+
+// Gaussian widths (tune as you like)
+//                        static constexpr T SIGMA_PLATFORM     = T(0.9)  * PLATFORM_HALF_SIZE;             // round
+//                        static constexpr T SIGMA_PIPE_LONG_X  = T(0.55) * (WORLD_HALF_X - PLATFORM_HALF_SIZE);
+//                        static constexpr T SIGMA_PIPE_LONG_Y  = T(0.55) * (WORLD_HALF_Y - PLATFORM_HALF_SIZE);
+//                        static constexpr T SIGMA_PIPE_SHORT   = T(0.35) * PIPE_WIDTH;                     // across pipe
+
+                        // // Gaussian widths (tune as you like)
+                        // static constexpr T SIGMA_PLATFORM     = T(1.4)  * PLATFORM_HALF_SIZE;             // round
+                        // static constexpr T SIGMA_PIPE_LONG_X  = T(0.75) * (WORLD_HALF_X - PLATFORM_HALF_SIZE);
+                        // static constexpr T SIGMA_PIPE_LONG_Y  = T(0.75) * (WORLD_HALF_Y - PLATFORM_HALF_SIZE);
+                        // static constexpr T SIGMA_PIPE_SHORT   = T(0.60) * PIPE_WIDTH;                     // across pipe
+
+                        // Gaussian widths (tune as you like)
+                        static constexpr T SIGMA_PLATFORM     = T(0.8)  * PLATFORM_HALF_SIZE;             // round
+                        static constexpr T SIGMA_PIPE_LONG_X  = T(0.4) * (WORLD_HALF_X - PLATFORM_HALF_SIZE);
+                        static constexpr T SIGMA_PIPE_LONG_Y  = T(0.4) * (WORLD_HALF_Y - PLATFORM_HALF_SIZE);
+                        static constexpr T SIGMA_PIPE_SHORT   = T(0.4) * PIPE_WIDTH;                     // across pipe
+
+
+
+                        // Amplitude per bump (all equal ⇒ equal importance)
+                        static constexpr T GAUSS_AMPLITUDE_PLATFORM = T(1.0);
+                        static constexpr T GAUSS_AMPLITUDE_PIPE     = T(1.0);
+
+// Aggregation: hard max by default (no overlap boost).
+// If you want smoothness, set TAU > 0 and use softmax in the evaluator.
+                        static constexpr T MULTIGAUSS_SOFTMAX_TAU = T(0.5);   // 0 ⇒ hard max, >0 ⇒ softmax
+
+                        // Hysteresis thresholds on normalized battery b01 = battery/100
+                        static constexpr T B_ON         = T(0.30);  // engage while at pad if b01 <= B_ON
+                        static constexpr T B_OFF        = T(0.75);  // release when b01 >= B_OFF
+                        static constexpr T B_SMOOTH_ON  = T(0.06);  // slope width around B_ON
+                        static constexpr T B_SMOOTH_OFF = T(0.06);  // slope width around B_OFF
+
+
+
+                        // Number of Gaussian bumps
+                        static constexpr TI N_GAUSS = 5;
+
+                        struct GaussSpec {
+                            T cx, cy;   // center
+                            T sx, sy;   // std dev along x/y (elliptical)
+                            T A;        // amplitude
+                        };
+
+// Build the 5 Gaussians at compile time
+                        static constexpr auto build_gauss_catalogue() {
+                            std::array<GaussSpec, N_GAUSS> g{};
+
+                            // World center
+                            const T CX = T(GRID_SIZE_X) * T(0.5);
+                            const T CY = T(GRID_SIZE_Y) * T(0.5);
+
+                            // Offsets from center to arm centers (measured along axes)
+                            const T offX = PLATFORM_HALF_SIZE + PIPE_CENTER_FRACTION * (WORLD_HALF_X - PLATFORM_HALF_SIZE);
+                            const T offY = PLATFORM_HALF_SIZE + PIPE_CENTER_FRACTION * (WORLD_HALF_Y - PLATFORM_HALF_SIZE);
+
+                            // 0) Platform (round)
+                            g[0] = GaussSpec{ CX,           CY,           SIGMA_PLATFORM,    SIGMA_PLATFORM,    GAUSS_AMPLITUDE_PLATFORM };
+
+                            // 1) Left arm  (long in x, short in y)
+                            g[1] = GaussSpec{ CX - offX,    CY,           SIGMA_PIPE_LONG_X, SIGMA_PIPE_SHORT,  GAUSS_AMPLITUDE_PIPE };
+
+                            // 2) Right arm (long in x, short in y)
+                            g[2] = GaussSpec{ CX + offX,    CY,           SIGMA_PIPE_LONG_X, SIGMA_PIPE_SHORT,  GAUSS_AMPLITUDE_PIPE };
+
+                            // 3) Top arm   (short in x, long in y)
+                            g[3] = GaussSpec{ CX,           CY + offY,    SIGMA_PIPE_SHORT,  SIGMA_PIPE_LONG_Y, GAUSS_AMPLITUDE_PIPE };
+
+                            // 4) Bottom arm(short in x, long in y)
+                            g[4] = GaussSpec{ CX,           CY - offY,    SIGMA_PIPE_SHORT,  SIGMA_PIPE_LONG_Y, GAUSS_AMPLITUDE_PIPE };
+
+                            return g;
+                        }
+
+                        static constexpr auto GAUSS_CATALOGUE = build_gauss_catalogue();
+
 
 
                         struct Point { T x, y; };
@@ -118,13 +227,19 @@ namespace rl_tools {
                                     const T y = DY * (gy + T(0.5));
 
                                     const T adx = std::abs(x - CX);
-                                    const T ady = std::abs(y - CY);
+//                                    const T ady = std::abs(y - CY);
+                                    const T ady = (y > CY) ? (y - CY) : (CY - y);
 
                                     const bool in_plat  = (adx <= PLATFORM_HALF_SIZE && ady <= PLATFORM_HALF_SIZE);
                                     const bool in_pipeh = (ady <= PIPE_WIDTH * 0.5 && adx >= PLATFORM_HALF_SIZE);
                                     const bool in_pipev = (adx <= PIPE_WIDTH * 0.5 && ady >= PLATFORM_HALF_SIZE);
 
+//                                    const bool in_right_pipeh =
+//                                            (ady <= PIPE_WIDTH * T(0.5)) &&
+//                                            (x   >= CX + PLATFORM_HALF_SIZE);
+
                                     if (in_plat || in_pipeh || in_pipev)
+//                                    if (in_right_pipeh)
                                         buf[n++] = {x, y};
                                 }
 
@@ -143,9 +258,11 @@ namespace rl_tools {
                         using PARAMETERS = T_PARAMETERS;
                         using T = typename PARAMETERS::T;
                         using TI = typename PARAMETERS::TI;
-                        static constexpr TI PER_AGENT_DIM = 9; // pos(2), vel(2), battery (1), dead (1), is_charging (1), is_detecting(1), time_in_cell (1)
+                        static constexpr TI PER_AGENT_DIM = 8; // pos(2), vel(2), battery (1), dead (1), is_charging (1), is_detecting(1)
                         static constexpr TI SHARED_DIM = 5; // last_detected_disaster_pos(2), charging_station_pos(2), disaster_detected_global (1)
-                        static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_DIM + SHARED_DIM;
+                        // For multi-agent wrapper compatibility: each agent gets its own copy of shared info
+                        static constexpr TI PER_AGENT_TOTAL_DIM = PER_AGENT_DIM + SHARED_DIM; // 8 + 5 = 13 per agent
+                        static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_TOTAL_DIM; // 3 * 13 = 39 (divisible by 3)
                     };
 
                     template <typename T, typename TI>
@@ -158,9 +275,12 @@ namespace rl_tools {
                         bool is_detecting;
 
                         // New grid tracking fields
-                        TI current_grid_x;
-                        TI current_grid_y;
-                        TI steps_in_current_cell;
+//                        TI current_grid_x;
+//                        TI current_grid_y;
+//                        TI steps_in_current_cell;
+//                        bool charge_latch;   // committed-to-charging memory
+                        TI charge_hold_remaining;  // counts down while locked to the charger
+
                     };
 
                     template <typename T>
@@ -179,17 +299,16 @@ namespace rl_tools {
                         TI appropriate_charging_count;
                         TI inappropriate_charging_count;
                         TI death_count;
-                        T  cumulative_potential_reward;                 // Σ r_t^{pot}
-                        TI potential_steps;                             // #steps accumulated
-                        TI cumulative_detection_latency;  // Σ first-detection latencies
-                        TI detection_count;  // # disasters that were spotted
+                        T  cumulative_potential_reward;
+                        TI potential_steps;
+                        TI cumulative_detection_latency;
+                        TI detection_count;
 
-                        /* ───── new ───── */
-//                        bool covered_grid[PARAMS::GRID_RES][PARAMS::GRID_RES];  // bitmap of visited hi-priority cells
-//                        TI total_covered_cells;                       // scalar loggable metric
-//
-//                        TI visit_age_grid[PARAMS::GRID_RES][PARAMS::GRID_RES];   // steps since last visit
+                        // New metrics for multiple disasters
+                        TI total_disasters_spawned;
+                        TI disasters_missed;  // Disasters that left without detection
 
+                        T per_step_reward;
                     };
 
 

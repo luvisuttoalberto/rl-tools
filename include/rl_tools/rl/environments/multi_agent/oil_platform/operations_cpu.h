@@ -29,6 +29,8 @@ namespace rl_tools {
         result += "\"PLATFORM_HALF_SIZE\":" + std::to_string(SPEC::PARAMETERS::PLATFORM_HALF_SIZE) + ",";
         result += "\"PIPE_WIDTH\":" + std::to_string(SPEC::PARAMETERS::PIPE_WIDTH) + ",";
         result += "\"SENSOR_RANGE\":" + std::to_string(SPEC::PARAMETERS::SENSOR_RANGE) + ",";
+        result += "\"CHARGING_STATION_POSITION_X\":" + std::to_string(SPEC::PARAMETERS::CHARGING_STATION_POSITION_X) + ",";
+        result += "\"CHARGING_STATION_POSITION_Y\":" + std::to_string(SPEC::PARAMETERS::CHARGING_STATION_POSITION_Y) + ",";
         result += "\"CHARGING_STATION_RANGE\":" + std::to_string(SPEC::PARAMETERS::CHARGING_STATION_RANGE);
         result += "}";
         return result;
@@ -79,7 +81,8 @@ namespace rl_tools {
         result += "\"disaster\": " + disaster + ",";
         result += "\"last_detected_disaster_position\": [" + std::to_string(state.last_detected_disaster_position[0]) + "," + std::to_string(state.last_detected_disaster_position[1]) + "],";
         result += "\"step_count\": " + std::to_string(state.step_count) + ",";
-        result += "\"disaster_undetected_steps\": " + std::to_string(state.disaster_undetected_steps);
+        result += "\"disaster_undetected_steps\": " + std::to_string(state.disaster_undetected_steps) + ",";
+        result += "\"per_step_reward\": " + std::to_string(state.metrics.per_step_reward);
         result += "}";
         return result;
     }
@@ -127,10 +130,8 @@ export async function render(ui_state, parameters, state, action) {
     const centerX = width / 2;
     const centerY = height / 2;
 
-//    const chargeX = 10;
-//    const chargeY = 10;
-    const chargeX = 5;
-    const chargeY = 5;
+    const chargeX = parameters.CHARGING_STATION_POSITION_X;
+    const chargeY = parameters.CHARGING_STATION_POSITION_Y;
 
     // Draw light grid
     ctx.strokeStyle = '#f0f0f0';
@@ -222,6 +223,19 @@ export async function render(ui_state, parameters, state, action) {
     ctx.stroke();
     ctx.setLineDash([]);
 
+    // Display per-step reward
+    if (state.per_step_reward !== undefined) {
+        ctx.fillStyle = 'black';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+
+        const rewardColor = state.per_step_reward > 0 ? 'green' : state.per_step_reward < 0 ? 'red' : 'gray';
+        ctx.fillStyle = rewardColor;
+        ctx.fillText(`Per-step Reward: ${state.per_step_reward.toFixed(3)}`, 10, 30);
+    }
+
+
     // Draw disaster if active
     if (state.disaster && state.disaster.active) {
         const disasterX = state.disaster.position[0] * scaleX;
@@ -285,6 +299,37 @@ export async function render(ui_state, parameters, state, action) {
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(i.toString(), posX, posY);
+
+            // Draw velocity vector if drone is moving
+            if (!drone.dead && (Math.abs(drone.velocity[0]) > 0.01 || Math.abs(drone.velocity[1]) > 0.01)) {
+                const velocityScale = 3; // Scale factor for velocity visualization
+                const vx = drone.velocity[0] * velocityScale * scaleX;
+                const vy = drone.velocity[1] * velocityScale * scaleY;
+
+                // Draw velocity arrow
+                ctx.strokeStyle = drone.is_charging ? '#90EE90' : '#FF6B6B';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(posX, posY);
+                ctx.lineTo(posX + vx, posY + vy);
+                ctx.stroke();
+
+                // Draw arrowhead
+                const angle = Math.atan2(vy, vx);
+                const arrowLength = 8;
+                ctx.beginPath();
+                ctx.moveTo(posX + vx, posY + vy);
+                ctx.lineTo(
+                    posX + vx - arrowLength * Math.cos(angle - Math.PI/6),
+                    posY + vy - arrowLength * Math.sin(angle - Math.PI/6)
+                );
+                ctx.moveTo(posX + vx, posY + vy);
+                ctx.lineTo(
+                    posX + vx - arrowLength * Math.cos(angle + Math.PI/6),
+                    posY + vy - arrowLength * Math.sin(angle + Math.PI/6)
+                );
+                ctx.stroke();
+            }
 
             // Battery indicator
             const batteryHeight = droneRadius * 0.8;
@@ -402,7 +447,7 @@ export async function render(ui_state, parameters, state, action) {
         // Create a background for better readability
         const padding = 5;
         const lineHeight = 16;
-        const textWidth = 180; // Increased width for more text
+        const textWidth = 340; // Increased width for more text
         const boxHeight = state.drone_states.length * lineHeight + padding * 2;
 
         ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
@@ -447,8 +492,21 @@ export async function render(ui_state, parameters, state, action) {
             const chargingStatus = drone.battery <= 0 ? 'DEAD' :
                                   drone.is_charging ? 'CHARGING' : 'ACTIVE';
             ctx.fillText(chargingStatus, 110, y);
+
+            // Show current position
+            ctx.fillStyle = '#333';
+            const posStr = `(${drone.position[0].toFixed(1)}, ${drone.position[1].toFixed(1)})`;
+            ctx.fillText(posStr, 200, y);
+
+            // Show velocity magnitude
+            const velocityMag = Math.sqrt(drone.velocity[0] * drone.velocity[0] +
+                                          drone.velocity[1] * drone.velocity[1]);
+            ctx.fillStyle = '#666';
+            const velStr = `v:${velocityMag.toFixed(2)}`;
+            ctx.fillText(velStr, 270, y);
         });
     }
+
     // Draw disaster detection legend
     if (state.drone_states && state.drone_states.length > 0) {
         // Create a legend showing disaster detection status for each drone
