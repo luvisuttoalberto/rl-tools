@@ -188,6 +188,113 @@ namespace rl_tools {
         return sum;
     }
 
+    /* --- Voronoi-based coverage reward ------------------------------------ */
+    /* Computes coverage quality using Voronoi tessellation:
+       - Each grid cell is assigned to its nearest agent
+       - Agents are rewarded for covering ROI (platform + pipes) cells, weighted by battery state
+       - Variance penalty encourages even distribution
+       This replaces Gaussian attraction + repulsion when USE_VORONOI_COVERAGE = true */
+    template<typename DEVICE, typename PARAMS>
+    RL_TOOLS_FUNCTION_PLACEMENT static
+    typename PARAMS::T calculate_voronoi_coverage_reward(
+            DEVICE &device,
+            const typename PARAMS::T (&pos)[PARAMS::N_AGENTS][2],
+            const bool (&dead)[PARAMS::N_AGENTS],
+            const typename PARAMS::T (&coverage_weights)[PARAMS::N_AGENTS]  // Per-agent battery-based weights
+    ) {
+        using T = typename PARAMS::T;
+        using TI = typename PARAMS::TI;
+
+        // Initialize per-agent ROI cell counters
+        T voronoi_roi_value[PARAMS::N_AGENTS];
+        for (TI i = 0; i < PARAMS::N_AGENTS; ++i) {
+            voronoi_roi_value[i] = T(0);
+        }
+
+        // Count alive agents and sum their weights
+        TI alive_count = 0;
+        T total_weight = T(0);
+        for (TI i = 0; i < PARAMS::N_AGENTS; ++i) {
+            if (!dead[i]) {
+                alive_count++;
+                total_weight += coverage_weights[i];
+            }
+        }
+
+        if (alive_count == 0 || total_weight < T(1e-6)) return T(0);  // No alive agents or no coverage capacity
+
+        // Grid parameters
+        constexpr T DX = T(PARAMS::GRID_SIZE_X) / PARAMS::GRID_RES;
+        constexpr T DY = T(PARAMS::GRID_SIZE_Y) / PARAMS::GRID_RES;
+        constexpr T CX = PARAMS::GRID_SIZE_X * T(0.5);
+        constexpr T CY = PARAMS::GRID_SIZE_Y * T(0.5);
+
+        // Sweep through grid cells and assign to nearest agent
+        for (TI gx = 0; gx < PARAMS::GRID_RES; ++gx) {
+            for (TI gy = 0; gy < PARAMS::GRID_RES; ++gy) {
+                T cx_cell = DX * (gx + T(0.5));
+                T cy_cell = DY * (gy + T(0.5));
+
+                // Check if cell is in ROI (platform or pipes)
+                T adx = math::abs(device.math, cx_cell - CX);
+                T ady = math::abs(device.math, cy_cell - CY);
+
+                bool in_platform = (adx <= PARAMS::PLATFORM_HALF_SIZE &&
+                                   ady <= PARAMS::PLATFORM_HALF_SIZE);
+                bool in_pipe_h = (ady <= PARAMS::PIPE_WIDTH * T(0.5) &&
+                                 adx >= PARAMS::PLATFORM_HALF_SIZE);
+                bool in_pipe_v = (adx <= PARAMS::PIPE_WIDTH * T(0.5) &&
+                                 ady >= PARAMS::PLATFORM_HALF_SIZE);
+
+                if (!(in_platform || in_pipe_h || in_pipe_v)) {
+                    continue;  // Skip non-ROI cells
+                }
+
+                // Find nearest alive agent to this cell (within sensor range)
+                TI nearest = -1;
+                T min_dist_sq = std::numeric_limits<T>::infinity();
+                constexpr T SENSOR_RANGE_SQ = PARAMS::SENSOR_RANGE * PARAMS::SENSOR_RANGE;
+
+                for (TI i = 0; i < PARAMS::N_AGENTS; ++i) {
+                    if (dead[i]) continue;
+
+                    T dx = cx_cell - pos[i][0];
+                    T dy = cy_cell - pos[i][1];
+                    T dist_sq = dx*dx + dy*dy;
+
+                    // Only consider agents within sensor range
+                    if (dist_sq < min_dist_sq && dist_sq <= SENSOR_RANGE_SQ) {
+                        min_dist_sq = dist_sq;
+                        nearest = i;
+                    }
+                }
+
+                // Assign cell to nearest agent ONLY if within sensor range
+                // This ensures agents must actually be close to ROI cells to get credit
+                // Similar to Gaussian approach where distance matters (exponential decay)
+                if (nearest >= 0) {
+                    voronoi_roi_value[nearest] += coverage_weights[nearest];
+                }
+                // If no agent is within sensor range of this cell, it remains uncovered (no reward)
+            }
+        }
+
+        // Calculate total weighted coverage
+        T total_coverage = T(0);
+
+        for (TI i = 0; i < PARAMS::N_AGENTS; ++i) {
+            total_coverage += voronoi_roi_value[i];
+        }
+
+        // Normalize coverage to [0,1] range
+        // Removed agents_contributing multiplier to prevent infinite spreading incentive
+        // Voronoi tessellation itself naturally encourages spreading (each agent wants their own cells)
+        // but without the multiplier, spreading stops at optimal coverage distance
+        T coverage_fraction = total_coverage / T(PARAMS::ROI_SIZE);
+
+        return coverage_fraction;
+    }
+
     /* --- helper: logistic sigmoid ----------------------------------------- */
     template<typename DEVICE, typename T>
     RL_TOOLS_FUNCTION_PLACEMENT static T logistic(DEVICE &device, T x) {
@@ -333,8 +440,13 @@ namespace rl_tools {
         for (TI agent_i = 0; agent_i < PARAMS::N_AGENTS; agent_i++) {
             auto &agent_state = state.drone_states[agent_i];
             // Spawn drones anywhere in the environment (not just center platform)
-            agent_state.position[0] = random::uniform_real_distribution(device.random, T(0), T(PARAMS::GRID_SIZE_X), rng);
-            agent_state.position[1] = random::uniform_real_distribution(device.random, T(0), T(PARAMS::GRID_SIZE_Y), rng);
+            agent_state.position[0] = random::uniform_real_distribution(device.random, T(PARAMS::GRID_SIZE_X)/2 - 2, T(PARAMS::GRID_SIZE_X)/2 + 2, rng);
+            agent_state.position[1] = random::uniform_real_distribution(device.random, T(PARAMS::GRID_SIZE_Y)/2 - 2, T(PARAMS::GRID_SIZE_Y)/2 + 2, rng);
+            // agent_state.position[0] = random::uniform_real_distribution(device.random, T(0), T(PARAMS::GRID_SIZE_X), rng);
+            // agent_state.position[1] = random::uniform_real_distribution(device.random, T(0), T(PARAMS::GRID_SIZE_Y), rng);
+            // agent_state.position[0] = T(PARAMS::GRID_SIZE_X/2);
+            // agent_state.position[1] = T(PARAMS::GRID_SIZE_Y/2);
+
             agent_state.velocity[0] = 0;
             agent_state.velocity[1] = 0;
             if (PARAMS::BATTERY_ENABLED){
@@ -1308,25 +1420,30 @@ namespace rl_tools {
             // Calculate coverage/disaster-detection potential at agent's position
             T coverage_potential = 0;
             
-//            if(!agent_next_state.is_charging){
-                if (disaster_phase) {
-                    // During disaster: Gaussian attraction toward disaster location
-                    T dx_to_disaster = agent_next_state.position[0] - next_state.disaster.position[0];
-                    T dy_to_disaster = agent_next_state.position[1] - next_state.disaster.position[1];
-                    T dist_to_disaster_squared = dx_to_disaster*dx_to_disaster + dy_to_disaster*dy_to_disaster;
-                    coverage_potential = math::exp(device.math, -(dist_to_disaster_squared) / (T(2) * sigma * sigma));
+            if (disaster_phase) {
+                // During disaster: Gaussian attraction toward disaster location (always, regardless of coverage method)
+                T dx_to_disaster = agent_next_state.position[0] - next_state.disaster.position[0];
+                T dy_to_disaster = agent_next_state.position[1] - next_state.disaster.position[1];
+                T dist_to_disaster_squared = dx_to_disaster*dx_to_disaster + dy_to_disaster*dy_to_disaster;
+                coverage_potential = math::exp(device.math, -(dist_to_disaster_squared) / (T(2) * sigma * sigma));
+                
+                // Agent contributes to coverage proportional to battery level
+                fleet_coverage_value += coverage_weight * coverage_potential;
+            } else {
+                // Coverage phase: choose between Voronoi or Gaussian based on compile-time flag
+                if constexpr (PARAMS::USE_VORONOI_COVERAGE) {
+                    // Voronoi coverage: computed collectively after loop, not per-agent
+                    // Per-agent potential set to 0 here, will be overridden after loop
+                    coverage_potential = T(0);
                 } else {
-                    // During coverage phase: Multi-Gaussian potential over platform+pipes
+                    // Original Gaussian coverage: Multi-Gaussian potential over platform+pipes
                     coverage_potential = multicenter_potential<DEVICE, PARAMS, T, TI>(device, 
                                                                                        agent_next_state.position[0], 
                                                                                        agent_next_state.position[1]);
+                    // Agent contributes to coverage proportional to battery level
+                    fleet_coverage_value += coverage_weight * coverage_potential;
                 }
-//            }
-
-            // Agent contributes to coverage proportional to battery level
-            // Low battery → low coverage_weight → agent should go charge instead
-            // NOTE: sensor_inbounds_fraction removed - don't penalize for physical sensor constraints
-            fleet_coverage_value += coverage_weight * coverage_potential;
+            }
 
             // Agent contributes to charging objective proportional to battery need
             // Low battery → high charging_weight → agent strongly encouraged to charge
@@ -1346,6 +1463,43 @@ namespace rl_tools {
                     // Only partial credit for proximity (scale down to avoid hovering)
                     fleet_charging_value += charging_weight * charging_proximity * T(0.5);
                 }
+            }
+        }
+
+        // Voronoi coverage: compute battery-weighted coverage after processing all agents
+        if constexpr (PARAMS::USE_VORONOI_COVERAGE) {
+            if (!disaster_phase) {
+                // Build position, dead, and coverage weight arrays for Voronoi computation
+                typename PARAMS::T pos_arr[N_AGENTS][2];
+                bool dead_arr[N_AGENTS];
+                typename PARAMS::T coverage_weight_arr[N_AGENTS];
+                
+                for (TI i = 0; i < N_AGENTS; ++i) {
+                    pos_arr[i][0] = next_state.drone_states[i].position[0];
+                    pos_arr[i][1] = next_state.drone_states[i].position[1];
+                    dead_arr[i] = next_state.drone_states[i].dead;
+                    
+                    // Extract per-agent coverage weight (calculated in loop above)
+                    if (next_state.drone_states[i].dead) {
+                        coverage_weight_arr[i] = T(0);
+                    } else {
+                        if constexpr (PARAMS::BATTERY_ENABLED) {
+                            T battery_normalized = next_state.drone_states[i].battery / T(100);
+                            T battery_urgency = linear_weight<DEVICE, PARAMS>(device, battery_normalized);
+                            battery_urgency = math::clamp(device.math, battery_urgency, T(0), T(1));
+                            coverage_weight_arr[i] = T(1) - battery_urgency;
+                        } else {
+                            coverage_weight_arr[i] = T(1);
+                        }
+                    }
+                }
+                
+                // Compute Voronoi coverage reward with per-agent battery weighting
+                // Returns weighted coverage value (cells weighted by agent's battery state)
+                // This maintains consistency with Gaussian approach where low-battery agents contribute less
+                fleet_coverage_value = calculate_voronoi_coverage_reward<DEVICE, PARAMS>(
+                    device, pos_arr, dead_arr, coverage_weight_arr
+                );
             }
         }
 
@@ -1400,7 +1554,7 @@ namespace rl_tools {
                 // This way penalty grows naturally with number of overlapping agents
                 TI pairs = active_agent_count * (active_agent_count - 1) / 2;
                 if (pairs > 0) repulsion_penalty = -PARAMS::REPULSION_BETA * (repulsion_sum / T(pairs));
-//                repulsion_penalty = -PARAMS::REPULSION_BETA * repulsion_sum;
+                repulsion_penalty = -PARAMS::REPULSION_BETA * repulsion_sum;
             }
         }
 
@@ -1410,6 +1564,16 @@ namespace rl_tools {
             T den = math::max(device.math, T(1), T(PARAMS::EPISODE_STEP_LIMIT) - T(next_state.disaster_spawn_step));
             temporal_penalty = -num / den;  // Already negative
         }
+
+        // Abandonment penalty: fixed penalty for not observing previously-detected disasters
+        // Use state (not next_state) to ensure penalty reflects consequences of past abandonment
+        T abandonment_penalty = T(0);
+        // if (state.disaster.active &&
+        //     state.disaster_detected_global &&
+        //     state.disaster_undetected_steps > 0) {
+        //     // Fixed penalty whenever disaster is unobserved after being detected
+        //     abandonment_penalty = PARAMS::ABANDONMENT_PENALTY;  // Already negative
+        // }
 
         T death_penalty = T(0);
         TI dead_count = 0;
@@ -1435,12 +1599,12 @@ namespace rl_tools {
             const auto& agent_next_state = next_state.drone_states[agent_i];
             if (!agent_next_state.dead) {
                 T speed = magnitude(device, agent_next_state.velocity[0], agent_next_state.velocity[1]);
-                movement_penalty -= PARAMS::MOVEMENT_COST_COEFFICIENT * speed;  // Make negative
+                movement_penalty -= PARAMS::MOVEMENT_COST_COEFFICIENT * speed*speed;  // Make negative
             }
         }
 
 //        T total_reward = coverage_penalty + charging_penalty + temporal_penalty + death_penalty + ongoing_death_penalty + movement_penalty + repulsion_penalty;
-        T total_reward = coverage_penalty + charging_penalty + repulsion_penalty + death_penalty + ongoing_death_penalty + movement_penalty;
+        T total_reward = coverage_penalty + charging_penalty + repulsion_penalty + abandonment_penalty + death_penalty + ongoing_death_penalty + movement_penalty;
 
         utils::assert_exit(device, !math::is_nan(device.math, total_reward), "reward is nan");
 
@@ -1613,6 +1777,8 @@ namespace rl_tools {
         using TI = typename SPEC::TI;
         constexpr TI PER_AGENT_OBS_DIM = OBS::PER_AGENT_DIM;
         constexpr TI SHARED_DIM = OBS::SHARED_DIM;
+        constexpr TI OTHER_AGENTS_DIM = OBS::OTHER_AGENTS_DIM;
+        constexpr TI PER_OTHER_AGENT_DIM = OBS::PER_OTHER_AGENT_DIM;
         constexpr TI PER_AGENT_TOTAL_DIM = OBS::PER_AGENT_TOTAL_DIM;
         using PARAMS = typename SPEC::PARAMETERS;
         
@@ -1628,7 +1794,7 @@ namespace rl_tools {
             const auto &agent_state = state.drone_states[agent_i];
             TI base_offset = agent_i * PER_AGENT_TOTAL_DIM;
             
-            // Per-agent observations (8 dimensions)
+            // Per-agent own observations (8 dimensions)
             set(observation, 0, base_offset + 0, 2 * (agent_state.position[0] / PARAMS::GRID_SIZE_X) - 1);  // Normalized position [-1,1]
             set(observation, 0, base_offset + 1, 2 * (agent_state.position[1] / PARAMS::GRID_SIZE_Y) - 1);  // Normalized position [-1,1]
             set(observation, 0, base_offset + 2, agent_state.dead ? 0 : agent_state.velocity[0] / PARAMS::MAX_SPEED);
@@ -1638,9 +1804,27 @@ namespace rl_tools {
             set(observation, 0, base_offset + 6, agent_state.dead ? 1 : -1);
             set(observation, 0, base_offset + 7, agent_state.dead ? -1 : agent_state.is_charging ? 1 : -1);
             
+            // Other agents' observations (6 dimensions per other agent: pos_x, pos_y, vel_x, vel_y, battery, charging)
+            TI other_agent_offset = 0;
+            for (TI other_i = 0; other_i < PARAMS::N_AGENTS; other_i++) {
+                if (other_i == agent_i) continue;  // Skip self
+                
+                const auto &other_state = state.drone_states[other_i];
+                TI offset = base_offset + PER_AGENT_OBS_DIM + other_agent_offset * PER_OTHER_AGENT_DIM;
+                
+                set(observation, 0, offset + 0, 2 * (other_state.position[0] / PARAMS::GRID_SIZE_X) - 1);  // Normalized position [-1,1]
+                set(observation, 0, offset + 1, 2 * (other_state.position[1] / PARAMS::GRID_SIZE_Y) - 1);  // Normalized position [-1,1]
+                set(observation, 0, offset + 2, other_state.dead ? 0 : other_state.velocity[0] / PARAMS::MAX_SPEED);
+                set(observation, 0, offset + 3, other_state.dead ? 0 : other_state.velocity[1] / PARAMS::MAX_SPEED);
+                set(observation, 0, offset + 4, 2 * (other_state.battery / 100) - 1);
+                set(observation, 0, offset + 5, other_state.dead ? -1 : other_state.is_charging ? 1 : -1);
+                
+                other_agent_offset++;
+            }
+            
             // Shared observations duplicated for each agent (5 dimensions)
             for (TI shared_i = 0; shared_i < SHARED_DIM; shared_i++) {
-                set(observation, 0, base_offset + PER_AGENT_OBS_DIM + shared_i, shared_obs[shared_i]);
+                set(observation, 0, base_offset + PER_AGENT_OBS_DIM + OTHER_AGENTS_DIM + shared_i, shared_obs[shared_i]);
             }
         }
 

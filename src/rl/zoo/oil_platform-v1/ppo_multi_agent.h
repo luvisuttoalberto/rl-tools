@@ -47,7 +47,7 @@ namespace rl_tools::rl::zoo::oil_platform_v1::ppo_multi_agent {
                 static constexpr T GAMMA = 0.98;
                 static constexpr T ACTION_ENTROPY_COEFFICIENT = 0.01;  // Reduced exploration
                 static constexpr TI N_EPOCHS = 1;  // Match bottleneck for stability
-                static constexpr bool IGNORE_TERMINATION = true;
+                static constexpr bool IGNORE_TERMINATION = false;
             };
         };
 

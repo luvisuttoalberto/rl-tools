@@ -21,7 +21,7 @@ namespace rl_tools {
                         using T = T_T;
                         using TI = T_TI;
 
-                        static constexpr bool BATTERY_ENABLED = true;
+                        static constexpr bool BATTERY_ENABLED = false;
                         static constexpr bool OVERLAP_REPULSION_ACTIVE = false;
                         // Number of drones
                         static constexpr TI N_AGENTS = 3;
@@ -48,7 +48,8 @@ namespace rl_tools {
                         // Disaster parameters
                         static constexpr T DISASTER_MAX_SPEED = 1.0;
                         static constexpr TI DISASTER_MINIMUM_SPAWN_STEP = 0;
-                        static constexpr T DISASTER_PROBABILITY_SPAWN = 0.01;
+                        // static constexpr T DISASTER_PROBABILITY_SPAWN = 0.01;
+                        static constexpr T DISASTER_PROBABILITY_SPAWN = 0.;
 
                         // --- new: stochastic drift controls -----------------------------------------
                         static constexpr T DISASTER_TURN_MAX_RAD       = T(0.10);   // ≤~5.7° yaw jitter/step
@@ -85,8 +86,11 @@ namespace rl_tools {
                         // Agent distribution (repulsion) parameters
                         static constexpr T OVERLAP_RHO_COVERAGE       = SENSOR_RANGE;        // Larger spacing during coverage (5.0)
                         static constexpr T OVERLAP_RHO_DETECTION       = SENSOR_RANGE * 0.3;  // Tighter spacing around disaster (1.5)
-                        static constexpr T REPULSION_BETA              = 0.3;                 // Penalty scale (increased from 0.5, no normalization)
+                        static constexpr T REPULSION_BETA              = 0.675;                 // Penalty scale
 
+                        // Voronoi coverage parameters (alternative to Gaussian + repulsion)
+                        static constexpr bool USE_VORONOI_COVERAGE = true;  // Toggle: true=Voronoi, false=Gaussian (original)
+                        static constexpr T VORONOI_VARIANCE_PENALTY_WEIGHT = T(0.3);  // Weight for distribution uniformity penalty
 
                         // For time in cell approx
                         static constexpr TI GRID_CELLS_X = 5; // Adjust based on your needs
@@ -106,14 +110,17 @@ namespace rl_tools {
 
                         // Battery and charging parameters
                         static constexpr T DISCHARGE_RATE = 0.15;
-                        static constexpr T GAUSS_SIGMA_CHARGING = CHARGING_STATION_RANGE*4;
+                        static constexpr T GAUSS_SIGMA_CHARGING = CHARGING_STATION_RANGE*2;
                         static constexpr T GAUSS_BETA_CHARGING = 1.0;
                         static constexpr T BATTERY_URGENCY_K = 1.0;
                         static constexpr T DEATH_PENALTY = -10.0;
                         
                         // Movement cost parameters
-                        static constexpr T MOVEMENT_COST_COEFFICIENT = 0.12;  // Cost per unit of speed
+                        static constexpr T MOVEMENT_COST_COEFFICIENT = 0.;  // Cost per unit of speed
 //                        static constexpr T MOVEMENT_COST_COEFFICIENT = 0.03;  // Cost per unit of speed
+
+                        // Abandonment penalty: penalize agents for not observing previously-detected disasters
+                        static constexpr T ABANDONMENT_PENALTY = -0.5;  // Fixed penalty when disaster is unobserved
 
                         // ---- Multi-center Gaussian reward (platform + 4 arms) -----------------
 
@@ -259,10 +266,12 @@ namespace rl_tools {
                         using T = typename PARAMETERS::T;
                         using TI = typename PARAMETERS::TI;
                         static constexpr TI PER_AGENT_DIM = 8; // pos(2), vel(2), battery (1), dead (1), is_charging (1), is_detecting(1)
+                        static constexpr TI PER_OTHER_AGENT_DIM = 6; // pos(2), vel(2), battery(1), is_charging(1) - per other agent
+                        static constexpr TI OTHER_AGENTS_DIM = (PARAMETERS::N_AGENTS - 1) * PER_OTHER_AGENT_DIM; // observations of all other agents
                         static constexpr TI SHARED_DIM = 5; // last_detected_disaster_pos(2), charging_station_pos(2), disaster_detected_global (1)
-                        // For multi-agent wrapper compatibility: each agent gets its own copy of shared info
-                        static constexpr TI PER_AGENT_TOTAL_DIM = PER_AGENT_DIM + SHARED_DIM; // 8 + 5 = 13 per agent
-                        static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_TOTAL_DIM; // 3 * 13 = 39 (divisible by 3)
+                        // For multi-agent wrapper compatibility: each agent gets its own state + other agents' states + shared info
+                        static constexpr TI PER_AGENT_TOTAL_DIM = PER_AGENT_DIM + OTHER_AGENTS_DIM + SHARED_DIM; // 8 + (N-1)*6 + 5 per agent
+                        static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_TOTAL_DIM; // N * (8 + (N-1)*6 + 5) (divisible by N)
                     };
 
                     template <typename T, typename TI>
