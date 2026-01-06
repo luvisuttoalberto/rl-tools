@@ -440,10 +440,10 @@ namespace rl_tools {
         for (TI agent_i = 0; agent_i < PARAMS::N_AGENTS; agent_i++) {
             auto &agent_state = state.drone_states[agent_i];
             // Spawn drones anywhere in the environment (not just center platform)
-            agent_state.position[0] = random::uniform_real_distribution(device.random, T(PARAMS::GRID_SIZE_X)/2 - 2, T(PARAMS::GRID_SIZE_X)/2 + 2, rng);
-            agent_state.position[1] = random::uniform_real_distribution(device.random, T(PARAMS::GRID_SIZE_Y)/2 - 2, T(PARAMS::GRID_SIZE_Y)/2 + 2, rng);
-            // agent_state.position[0] = random::uniform_real_distribution(device.random, T(0), T(PARAMS::GRID_SIZE_X), rng);
-            // agent_state.position[1] = random::uniform_real_distribution(device.random, T(0), T(PARAMS::GRID_SIZE_Y), rng);
+            // agent_state.position[0] = random::uniform_real_distribution(device.random, T(PARAMS::GRID_SIZE_X)/2 - 2, T(PARAMS::GRID_SIZE_X)/2 + 2, rng);
+            // agent_state.position[1] = random::uniform_real_distribution(device.random, T(PARAMS::GRID_SIZE_Y)/2 - 2, T(PARAMS::GRID_SIZE_Y)/2 + 2, rng);
+            agent_state.position[0] = random::uniform_real_distribution(device.random, T(0), T(PARAMS::GRID_SIZE_X), rng);
+            agent_state.position[1] = random::uniform_real_distribution(device.random, T(0), T(PARAMS::GRID_SIZE_Y), rng);
             // agent_state.position[0] = T(PARAMS::GRID_SIZE_X/2);
             // agent_state.position[1] = T(PARAMS::GRID_SIZE_Y/2);
 
@@ -810,8 +810,13 @@ namespace rl_tools {
             agent_next_state = agent_state;
             if (!agent_state.dead) {
 
-                T desired_vx = get(action, 0, agent_i * 2 + 0);   // already ∈[-1,1]
-                T desired_vy = get(action, 0, agent_i * 2 + 1);
+                T desired_vx = get(action, 0, agent_i * 2 + 0);   // expected ∈[-1,1]
+                T desired_vy = get(action, 0, agent_i * 2 + 1);   // expected ∈[-1,1]
+
+                // In the multi-agent wrapper (ppo implementation), the default activation function of the last layer is not in [-1,1]
+                // so we clamp
+                desired_vx = math::clamp(device.math, desired_vx, T(-1), T(1));
+                desired_vy = math::clamp(device.math, desired_vy, T(-1), T(1));
 
                 constexpr T ALPHA = 0.6;                  // 0<α≤1  → smaller α = more inertia
                 desired_vx = agent_state.velocity[0] + ALPHA * (desired_vx * PARAMS::MAX_SPEED
@@ -1760,6 +1765,7 @@ namespace rl_tools {
 
 
 
+#ifndef RL_TOOLS_USE_MULTI_AGENT_PPO
     template<typename DEVICE, typename SPEC, typename OBS_SPEC, typename OBS_PARAMETERS, typename RNG>
     RL_TOOLS_FUNCTION_PLACEMENT static void observe(
             DEVICE &device,
@@ -1775,11 +1781,8 @@ namespace rl_tools {
         static_assert(OBS_SPEC::COLS == OBS::DIM);
         using T = typename SPEC::T;
         using TI = typename SPEC::TI;
-        constexpr TI PER_AGENT_OBS_DIM = OBS::PER_AGENT_DIM;
+        constexpr TI PER_AGENT_DIM = OBS::PER_AGENT_DIM;
         constexpr TI SHARED_DIM = OBS::SHARED_DIM;
-        constexpr TI OTHER_AGENTS_DIM = OBS::OTHER_AGENTS_DIM;
-        constexpr TI PER_OTHER_AGENT_DIM = OBS::PER_OTHER_AGENT_DIM;
-        constexpr TI PER_AGENT_TOTAL_DIM = OBS::PER_AGENT_TOTAL_DIM;
         using PARAMS = typename SPEC::PARAMETERS;
         
         // Pre-compute shared observations once
@@ -1792,44 +1795,90 @@ namespace rl_tools {
         
         for (TI agent_i = 0; agent_i < PARAMS::N_AGENTS; agent_i++) {
             const auto &agent_state = state.drone_states[agent_i];
-            TI base_offset = agent_i * PER_AGENT_TOTAL_DIM;
+            TI offset = agent_i * PER_AGENT_DIM;
             
             // Per-agent own observations (8 dimensions)
-            set(observation, 0, base_offset + 0, 2 * (agent_state.position[0] / PARAMS::GRID_SIZE_X) - 1);  // Normalized position [-1,1]
-            set(observation, 0, base_offset + 1, 2 * (agent_state.position[1] / PARAMS::GRID_SIZE_Y) - 1);  // Normalized position [-1,1]
-            set(observation, 0, base_offset + 2, agent_state.dead ? 0 : agent_state.velocity[0] / PARAMS::MAX_SPEED);
-            set(observation, 0, base_offset + 3, agent_state.dead ? 0 : agent_state.velocity[1] / PARAMS::MAX_SPEED);
-            set(observation, 0, base_offset + 4, agent_state.dead ? -1 : (agent_state.is_detecting ? 1 : -1));
-            set(observation, 0, base_offset + 5, 2 * (agent_state.battery / 100) - 1);
-            set(observation, 0, base_offset + 6, agent_state.dead ? 1 : -1);
-            set(observation, 0, base_offset + 7, agent_state.dead ? -1 : agent_state.is_charging ? 1 : -1);
-            
-            // Other agents' observations (6 dimensions per other agent: pos_x, pos_y, vel_x, vel_y, battery, charging)
-            TI other_agent_offset = 0;
-            for (TI other_i = 0; other_i < PARAMS::N_AGENTS; other_i++) {
-                if (other_i == agent_i) continue;  // Skip self
-                
-                const auto &other_state = state.drone_states[other_i];
-                TI offset = base_offset + PER_AGENT_OBS_DIM + other_agent_offset * PER_OTHER_AGENT_DIM;
-                
-                set(observation, 0, offset + 0, 2 * (other_state.position[0] / PARAMS::GRID_SIZE_X) - 1);  // Normalized position [-1,1]
-                set(observation, 0, offset + 1, 2 * (other_state.position[1] / PARAMS::GRID_SIZE_Y) - 1);  // Normalized position [-1,1]
-                set(observation, 0, offset + 2, other_state.dead ? 0 : other_state.velocity[0] / PARAMS::MAX_SPEED);
-                set(observation, 0, offset + 3, other_state.dead ? 0 : other_state.velocity[1] / PARAMS::MAX_SPEED);
-                set(observation, 0, offset + 4, 2 * (other_state.battery / 100) - 1);
-                set(observation, 0, offset + 5, other_state.dead ? -1 : other_state.is_charging ? 1 : -1);
-                
-                other_agent_offset++;
-            }
-            
-            // Shared observations duplicated for each agent (5 dimensions)
-            for (TI shared_i = 0; shared_i < SHARED_DIM; shared_i++) {
-                set(observation, 0, base_offset + PER_AGENT_OBS_DIM + OTHER_AGENTS_DIM + shared_i, shared_obs[shared_i]);
-            }
+            set(observation, 0, offset + 0, 2 * (agent_state.position[0] / PARAMS::GRID_SIZE_X) - 1);  // Normalized position [-1,1]
+            set(observation, 0, offset + 1, 2 * (agent_state.position[1] / PARAMS::GRID_SIZE_Y) - 1);  // Normalized position [-1,1]
+            set(observation, 0, offset + 2, agent_state.dead ? 0 : agent_state.velocity[0] / PARAMS::MAX_SPEED);
+            set(observation, 0, offset + 3, agent_state.dead ? 0 : agent_state.velocity[1] / PARAMS::MAX_SPEED);
+            set(observation, 0, offset + 4, agent_state.dead ? -1 : (agent_state.is_detecting ? 1 : -1));
+            set(observation, 0, offset + 5, 2 * (agent_state.battery / 100) - 1);
+            set(observation, 0, offset + 6, agent_state.dead ? 1 : -1);
+            set(observation, 0, offset + 7, agent_state.dead ? -1 : agent_state.is_charging ? 1 : -1);
+        }
+
+        // Append shared observations once after all agent states
+        TI shared_offset = PARAMS::N_AGENTS * PER_AGENT_DIM;
+        for (TI shared_i = 0; shared_i < SHARED_DIM; shared_i++) {
+            set(observation, 0, shared_offset + shared_i, shared_obs[shared_i]);
         }
 
         utils::assert_exit(device, !is_nan(device, observation), "Observation is nan");
 
+    }
+#else
+#include "operations_generic_ppo.h"
+#endif
+
+    template<typename DEVICE, typename SPEC, typename OBS_SPEC, typename OBS_PARAMETERS, typename RNG>
+    RL_TOOLS_FUNCTION_PLACEMENT static void observe(
+            DEVICE &device,
+            const rl::environments::multi_agent::OilPlatform<SPEC> &env,
+            const typename rl::environments::multi_agent::OilPlatform<SPEC>::Parameters &parameters,
+            const typename rl::environments::multi_agent::OilPlatform<SPEC>::State &state,
+            const rl::environments::multi_agent::oil_platform::ObservationPrivileged<OBS_PARAMETERS> &,
+            Matrix<OBS_SPEC> &observation,
+            RNG &rng
+    ) {
+        using OBS = rl::environments::multi_agent::oil_platform::ObservationPrivileged<OBS_PARAMETERS>;
+        static_assert(OBS_SPEC::ROWS == 1);
+        static_assert(OBS_SPEC::COLS == OBS::DIM);
+        using T = typename SPEC::T;
+        using TI = typename SPEC::TI;
+        constexpr TI PER_AGENT_DIM = OBS::PER_AGENT_DIM;
+        using PARAMS = typename SPEC::PARAMETERS;
+        (void)env;
+        (void)parameters;
+        (void)rng;
+
+        // Per-agent features (shared critic view)
+        for (TI agent_i = 0; agent_i < PARAMS::N_AGENTS; agent_i++) {
+            const auto &agent_state = state.drone_states[agent_i];
+            TI base_offset = agent_i * PER_AGENT_DIM;
+
+            set(observation, 0, base_offset + 0, 2 * (agent_state.position[0] / PARAMS::GRID_SIZE_X) - 1);  // pos_x
+            set(observation, 0, base_offset + 1, 2 * (agent_state.position[1] / PARAMS::GRID_SIZE_Y) - 1);  // pos_y
+            set(observation, 0, base_offset + 2, agent_state.dead ? 0 : agent_state.velocity[0] / PARAMS::MAX_SPEED);
+            set(observation, 0, base_offset + 3, agent_state.dead ? 0 : agent_state.velocity[1] / PARAMS::MAX_SPEED);
+            set(observation, 0, base_offset + 4, agent_state.dead ? -1 : agent_state.is_detecting ? 1 : -1);
+            set(observation, 0, base_offset + 5, 2 * (agent_state.battery / 100) - 1);
+            set(observation, 0, base_offset + 6, agent_state.dead ? 1 : -1);
+            set(observation, 0, base_offset + 7, agent_state.dead ? -1 : agent_state.is_charging ? 1 : -1);
+        }
+
+        // Shared global features
+        TI shared_offset = PARAMS::N_AGENTS * PER_AGENT_DIM;
+        T disaster_active_flag = state.disaster.active ? T(1) : T(-1);
+        T disaster_detected_flag = state.disaster_detected_global ? T(1) : T(-1);
+
+        T disaster_pos_x = state.disaster.active ? T(2) * (state.disaster.position[0] / PARAMS::GRID_SIZE_X) - T(1) : T(0);
+        T disaster_pos_y = state.disaster.active ? T(2) * (state.disaster.position[1] / PARAMS::GRID_SIZE_Y) - T(1) : T(0);
+        T disaster_vel_x = state.disaster.active ? state.disaster.velocity[0] / PARAMS::DISASTER_MAX_SPEED : T(0);
+        T disaster_vel_y = state.disaster.active ? state.disaster.velocity[1] / PARAMS::DISASTER_MAX_SPEED : T(0);
+        T charger_pos_x = T(2) * (PARAMS::CHARGING_STATION_POSITION_X / PARAMS::GRID_SIZE_X) - T(1);
+        T charger_pos_y = T(2) * (PARAMS::CHARGING_STATION_POSITION_Y / PARAMS::GRID_SIZE_Y) - T(1);
+
+        set(observation, 0, shared_offset + 0, disaster_active_flag);
+        set(observation, 0, shared_offset + 1, disaster_detected_flag);
+        set(observation, 0, shared_offset + 2, disaster_pos_x);
+        set(observation, 0, shared_offset + 3, disaster_pos_y);
+        set(observation, 0, shared_offset + 4, disaster_vel_x);
+        set(observation, 0, shared_offset + 5, disaster_vel_y);
+        set(observation, 0, shared_offset + 6, charger_pos_x);
+        set(observation, 0, shared_offset + 7, charger_pos_y);
+
+        utils::assert_exit(device, !is_nan(device, observation), "Privileged observation is nan");
     }
 
     template<typename DEVICE, typename SPEC, typename RNG>
