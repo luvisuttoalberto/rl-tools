@@ -21,8 +21,17 @@ namespace rl_tools {
                         using T = T_T;
                         using TI = T_TI;
 
-                        static constexpr bool BATTERY_ENABLED = false;
+                        static constexpr bool BATTERY_ENABLED = true;
+
+                        // Voronoi coverage
+                        static constexpr bool USE_VORONOI_COVERAGE = true;  // Toggle: true=Voronoi, false=Gaussian
+                        static constexpr T VORONOI_VARIANCE_PENALTY_WEIGHT = T(0.3);  // Weight for distribution uniformity penalty
+
                         static constexpr bool OVERLAP_REPULSION_ACTIVE = false;
+                        static constexpr T REPULSION_BETA = 0.675;
+                        static constexpr bool CONST_PENALTY_WHILE_COVERAGE = false;
+
+
                         // Number of drones
                         static constexpr TI N_AGENTS = 3;
 
@@ -55,12 +64,14 @@ namespace rl_tools {
                         static constexpr T DISASTER_TURN_MAX_RAD       = T(0.10);   // ≤~5.7° yaw jitter/step
                         static constexpr T DISASTER_SPEED_JITTER_FRAC  = T(0.10);   // ±10% fractional speed jitter
 // ----------------------------------------------------------------------------
+                        static constexpr bool DISASTER_REWARD_SWITCH_ON_DETECTION = true;
 
                         // Charging parameters
                         static constexpr T CHARGING_RATE = 1.0;
 //                        static constexpr T DISCHARGE_RATE = 0.15;
                         static constexpr T CHARGING_STATION_RANGE = 2.0;
                         static constexpr T CHARGING_VELOCITY_THRESHOLD = 0.75;
+                        static constexpr bool RANDOMIZE_CHARGING_STATION_POSITION = true;
                         static constexpr T CHARGING_STATION_POSITION_X = 5.0;
                         static constexpr T CHARGING_STATION_POSITION_Y = 5.0;
                         static constexpr T MINIMUM_BATTERY_FOR_CHARGING = 80.0;
@@ -86,11 +97,6 @@ namespace rl_tools {
                         // Agent distribution (repulsion) parameters
                         static constexpr T OVERLAP_RHO_COVERAGE       = SENSOR_RANGE;        // Larger spacing during coverage (5.0)
                         static constexpr T OVERLAP_RHO_DETECTION       = SENSOR_RANGE * 0.3;  // Tighter spacing around disaster (1.5)
-                        static constexpr T REPULSION_BETA              = 0.675;                 // Penalty scale
-
-                        // Voronoi coverage parameters (alternative to Gaussian + repulsion)
-                        static constexpr bool USE_VORONOI_COVERAGE = true;  // Toggle: true=Voronoi, false=Gaussian (original)
-                        static constexpr T VORONOI_VARIANCE_PENALTY_WEIGHT = T(0.3);  // Weight for distribution uniformity penalty
 
                         // For time in cell approx
                         static constexpr TI GRID_CELLS_X = 5; // Adjust based on your needs
@@ -265,13 +271,30 @@ namespace rl_tools {
                         using PARAMETERS = T_PARAMETERS;
                         using T = typename PARAMETERS::T;
                         using TI = typename PARAMETERS::TI;
+#ifdef RL_TOOLS_USE_MULTI_AGENT_PPO
+                        // Multi-agent wrapper friendly layout: own state + other agents + shared, per agent
                         static constexpr TI PER_AGENT_DIM = 8; // pos(2), vel(2), battery (1), dead (1), is_charging (1), is_detecting(1)
                         static constexpr TI PER_OTHER_AGENT_DIM = 6; // pos(2), vel(2), battery(1), is_charging(1) - per other agent
                         static constexpr TI OTHER_AGENTS_DIM = (PARAMETERS::N_AGENTS - 1) * PER_OTHER_AGENT_DIM; // observations of all other agents
                         static constexpr TI SHARED_DIM = 5; // last_detected_disaster_pos(2), charging_station_pos(2), disaster_detected_global (1)
-                        // For multi-agent wrapper compatibility: each agent gets its own state + other agents' states + shared info
                         static constexpr TI PER_AGENT_TOTAL_DIM = PER_AGENT_DIM + OTHER_AGENTS_DIM + SHARED_DIM; // 8 + (N-1)*6 + 5 per agent
                         static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_TOTAL_DIM; // N * (8 + (N-1)*6 + 5) (divisible by N)
+#else
+                        // SAC-friendly layout: all agents' blocks concatenated, then shared info once
+                        static constexpr TI PER_AGENT_DIM = 8; // pos(2), vel(2), is_detecting(1), battery(1), dead(1), is_charging(1)
+                        static constexpr TI SHARED_DIM = 5; // disaster_detected flag, last_detected_disaster_pos(2), charging_station_pos(2)
+                        static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_DIM + SHARED_DIM; // concatenated per-agent blocks + shared info
+#endif
+                    };
+
+                    template <typename T_PARAMETERS>
+                    struct ObservationPrivileged {
+                        using PARAMETERS = T_PARAMETERS;
+                        using T = typename PARAMETERS::T;
+                        using TI = typename PARAMETERS::TI;
+                        static constexpr TI PER_AGENT_DIM = 8; // pos(2), vel(2), is_detecting(1), battery(1), dead(1), is_charging(1)
+                        static constexpr TI SHARED_DIM = 8;    // disaster_active flag, disaster_detected_global flag, disaster_pos(2), disaster_vel(2), charging_station_pos(2)
+                        static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_DIM + SHARED_DIM; // global critic observation
                     };
 
                     template <typename T, typename TI>
@@ -334,19 +357,22 @@ namespace rl_tools {
                         T step_count;
                         T disaster_undetected_steps;
                         T last_detected_disaster_position[2];
+                        T charging_station_position[2];
                         TI disaster_spawn_step;   // episode step index at spawn time
                     };
 
 
                     template <typename T_T, typename T_TI,
                             typename T_PARAMETERS = DefaultParameters<T_T, T_TI>,
-                            typename T_OBSERVATION = Observation<T_PARAMETERS>>
+                            typename T_OBSERVATION = Observation<T_PARAMETERS>,
+                            typename T_OBSERVATION_PRIVILEGED = T_OBSERVATION>
                     struct Specification {
                         using T = T_T;
                         using TI = T_TI;
                         using OBSERVATION = T_OBSERVATION;
+                        using OBSERVATION_PRIVILEGED = T_OBSERVATION_PRIVILEGED;
                         using PARAMETERS = T_PARAMETERS;
-                        using STATE = State<Specification<T_T, T_TI, T_PARAMETERS, T_OBSERVATION>>;
+                        using STATE = State<Specification<T_T, T_TI, T_PARAMETERS, T_OBSERVATION, T_OBSERVATION_PRIVILEGED>>;
                         using ACTION = Matrix<
                                 matrix::Specification<
                                         T, TI,
@@ -370,7 +396,7 @@ namespace rl_tools {
                     using State = typename SPEC::STATE;
                     using Parameters = typename SPEC::PARAMETERS;
                     using Observation = typename SPEC::OBSERVATION;
-                    using ObservationPrivileged = Observation;
+                    using ObservationPrivileged = typename SPEC::OBSERVATION_PRIVILEGED;
                     using Action = typename SPEC::ACTION;
                     static constexpr TI N_AGENTS = Parameters::N_AGENTS;
                     static constexpr TI PER_AGENT_ACTION_DIM = 2; // acceleration in x and y

@@ -80,6 +80,7 @@ namespace rl_tools {
         result += "\"drone_states\": " + drone_states + ",";
         result += "\"disaster\": " + disaster + ",";
         result += "\"last_detected_disaster_position\": [" + std::to_string(state.last_detected_disaster_position[0]) + "," + std::to_string(state.last_detected_disaster_position[1]) + "],";
+        result += "\"charging_station_position\": [" + std::to_string(state.charging_station_position[0]) + "," + std::to_string(state.charging_station_position[1]) + "],";
         result += "\"step_count\": " + std::to_string(state.step_count) + ",";
         result += "\"disaster_undetected_steps\": " + std::to_string(state.disaster_undetected_steps) + ",";
         result += "\"per_step_reward\": " + std::to_string(state.metrics.per_step_reward);
@@ -130,8 +131,8 @@ export async function render(ui_state, parameters, state, action) {
     const centerX = width / 2;
     const centerY = height / 2;
 
-    const chargeX = parameters.CHARGING_STATION_POSITION_X;
-    const chargeY = parameters.CHARGING_STATION_POSITION_Y;
+    const chargeX = state.charging_station_position[0];
+    const chargeY = state.charging_station_position[1];
 
     // Draw light grid
     ctx.strokeStyle = '#f0f0f0';

@@ -82,6 +82,7 @@ target_link_libraries(rl_zoo_oil_platform-v1_ppo_multi_agent PRIVATE RLtools::RL
 RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_oil_platform-v1_ppo_multi_agent)
 target_compile_definitions(rl_zoo_oil_platform-v1_ppo_multi_agent PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_PPO)
 target_compile_definitions(rl_zoo_oil_platform-v1_ppo_multi_agent PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_OIL_PLATFORM)
+target_compile_definitions(rl_zoo_oil_platform-v1_ppo_multi_agent PRIVATE RL_TOOLS_USE_MULTI_AGENT_PPO)
 target_compile_options(rl_zoo_oil_platform-v1_ppo_multi_agent PRIVATE -Ofast -march=native)
 
 # Oil Platform SAC (Hierarchical)
