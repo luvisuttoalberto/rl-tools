@@ -31,7 +31,8 @@ namespace rl_tools {
         result += "\"SENSOR_RANGE\":" + std::to_string(SPEC::PARAMETERS::SENSOR_RANGE) + ",";
         result += "\"CHARGING_STATION_POSITION_X\":" + std::to_string(SPEC::PARAMETERS::CHARGING_STATION_POSITION_X) + ",";
         result += "\"CHARGING_STATION_POSITION_Y\":" + std::to_string(SPEC::PARAMETERS::CHARGING_STATION_POSITION_Y) + ",";
-        result += "\"CHARGING_STATION_RANGE\":" + std::to_string(SPEC::PARAMETERS::CHARGING_STATION_RANGE);
+        result += "\"CHARGING_STATION_RANGE\":" + std::to_string(SPEC::PARAMETERS::CHARGING_STATION_RANGE) + ",";
+        result += "\"CHARGING_OBJECTIVE_VARIANT\":" + std::to_string(SPEC::PARAMETERS::CHARGING_OBJECTIVE_VARIANT);
         result += "}";
         return result;
     }
@@ -83,7 +84,16 @@ namespace rl_tools {
         result += "\"charging_station_position\": [" + std::to_string(state.charging_station_position[0]) + "," + std::to_string(state.charging_station_position[1]) + "],";
         result += "\"step_count\": " + std::to_string(state.step_count) + ",";
         result += "\"disaster_undetected_steps\": " + std::to_string(state.disaster_undetected_steps) + ",";
-        result += "\"per_step_reward\": " + std::to_string(state.metrics.per_step_reward);
+        result += "\"per_step_reward\": " + std::to_string(state.metrics.per_step_reward) + ",";
+        result += "\"coverage_penalty\": " + std::to_string(state.metrics.coverage_penalty) + ",";
+        result += "\"charging_penalty\": " + std::to_string(state.metrics.charging_penalty) + ",";
+        result += "\"battery_risk_penalty\": " + std::to_string(state.metrics.battery_risk_penalty) + ",";
+        result += "\"charging_event_penalty\": " + std::to_string(state.metrics.charging_event_penalty) + ",";
+        result += "\"repulsion_penalty\": " + std::to_string(state.metrics.repulsion_penalty) + ",";
+        result += "\"abandonment_penalty\": " + std::to_string(state.metrics.abandonment_penalty) + ",";
+        result += "\"death_penalty\": " + std::to_string(state.metrics.death_penalty) + ",";
+        result += "\"ongoing_death_penalty\": " + std::to_string(state.metrics.ongoing_death_penalty) + ",";
+        result += "\"movement_penalty\": " + std::to_string(state.metrics.movement_penalty);
         result += "}";
         return result;
     }
@@ -224,16 +234,44 @@ export async function render(ui_state, parameters, state, action) {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Display per-step reward
+    // Display per-step reward and reward components
     if (state.per_step_reward !== undefined) {
-        ctx.fillStyle = 'black';
         ctx.font = '12px Arial';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
 
-        const rewardColor = state.per_step_reward > 0 ? 'green' : state.per_step_reward < 0 ? 'red' : 'gray';
-        ctx.fillStyle = rewardColor;
-        ctx.fillText(`Per-step Reward: ${state.per_step_reward.toFixed(3)}`, 10, 30);
+        const baseX = 10;
+        const baseY = 30;
+        const lineHeight = 14;
+        const chargingVariant = parameters.CHARGING_OBJECTIVE_VARIANT ?? 0;
+        const chargingLabel = chargingVariant === 0
+            ? 'Charging Penalty (Gaussian)'
+            : chargingVariant === 1
+                ? 'Battery Risk Penalty'
+                : 'Battery Management Penalty';
+        const rewardLines = [
+            ['Per-step Reward', state.per_step_reward],
+            ['Coverage Penalty', state.coverage_penalty],
+            [chargingLabel, state.charging_penalty],
+            ['Battery Risk Component', state.battery_risk_penalty],
+            ['Charging Event Component', state.charging_event_penalty],
+            ['Repulsion Penalty', state.repulsion_penalty],
+            ['Abandonment Penalty', state.abandonment_penalty],
+            ['Death Penalty', state.death_penalty],
+            ['Ongoing Death Penalty', state.ongoing_death_penalty],
+            ['Movement Penalty', state.movement_penalty]
+        ];
+
+        let lineIndex = 0;
+        for (const [label, value] of rewardLines) {
+            if (value === undefined) {
+                continue;
+            }
+            const color = value > 0 ? 'green' : value < 0 ? 'red' : 'gray';
+            ctx.fillStyle = color;
+            ctx.fillText(`${label}: ${value.toFixed(3)}`, baseX, baseY + lineIndex * lineHeight);
+            lineIndex++;
+        }
     }
 
 
