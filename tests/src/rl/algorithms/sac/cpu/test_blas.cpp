@@ -14,6 +14,7 @@
 TEST(RL_TOOLS_RL_ALGORITHMS_SAC, FULL_TRAINING_BLAS){
     std::cout << "Current working directory: " << std::filesystem::current_path() << std::endl;
     static constexpr TI NUM_EVALUATION_EPISODES = 10;
+    using T = float;
 #ifdef RL_TOOLS_TESTS_CODE_COVERAGE
     static constexpr TI NUM_ITERATIONS = 2;
 #else
@@ -40,7 +41,7 @@ TEST(RL_TOOLS_RL_ALGORITHMS_SAC, FULL_TRAINING_BLAS){
             finished = rlt::step(device, ts);
             if(ts.step % 1000 == 0){
                 rlt::rl::utils::evaluation::Result<typename decltype(ts)::CONFIG::EVALUATION_RESULT_SPEC> result;
-                rlt::evaluate(device, ts.env_eval, ts.env_eval_parameters, ts.ui, rl_tools::get_actor(ts), result, ts.actor_deterministic_evaluation_buffers, ts.rng_eval, rlt::Mode<rlt::mode::Evaluation<>>{}, false);
+                rlt::evaluate(device, ts.env_eval, ts.ui, rl_tools::get_actor(ts), result, ts.rng_eval, rlt::Mode<rlt::mode::Evaluation<>>{});
                 current_evaluation_returns.push_back(result.returns_mean);
 //                std::sort(current_evaluation_returns.begin(), current_evaluation_returns.end());
 //                std::cout << "perc60: " << current_evaluation_returns[evaluation_returns.size()*0.6] << std::endl;

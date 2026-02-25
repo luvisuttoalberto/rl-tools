@@ -6,7 +6,7 @@
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools::rl::components::on_policy_runner::per_env{
     template <typename DEVICE, typename OBSERVATIONS_PRIVILEGED_SPEC, typename OBSERVATIONS_SPEC, typename SPEC, typename RNG> // todo: make this not PPO but general policy with output distribution
-    void prologue(DEVICE& device, Matrix<OBSERVATIONS_PRIVILEGED_SPEC>& observations_privileged, Matrix<OBSERVATIONS_SPEC>& observations, rl::components::OnPolicyRunner<SPEC>& runner, RNG& rng, typename DEVICE::index_t env_i){
+    RL_TOOLS_FUNCTION_PLACEMENT void prologue(DEVICE& device, Matrix<OBSERVATIONS_PRIVILEGED_SPEC>& observations_privileged, Matrix<OBSERVATIONS_SPEC>& observations, rl::components::OnPolicyRunner<SPEC>& runner, RNG& rng, typename DEVICE::index_t env_i){
         static_assert(OBSERVATIONS_SPEC::ROWS == SPEC::N_ENVIRONMENTS);
         static_assert(OBSERVATIONS_SPEC::COLS == SPEC::ENVIRONMENT::Observation::DIM);
         static_assert(OBSERVATIONS_PRIVILEGED_SPEC::ROWS == SPEC::N_ENVIRONMENTS);
@@ -15,8 +15,10 @@ namespace rl_tools::rl::components::on_policy_runner::per_env{
         auto& state = get(runner.states, 0, env_i);
         auto& parameters = get(runner.env_parameters, 0, env_i);
         if(get(runner.truncated, 0, env_i)){
-            add_scalar(device, device.logger, "episode/length", get(runner.episode_step, 0, env_i));
-            add_scalar(device, device.logger, "episode/return", get(runner.episode_return, 0, env_i));
+            if (env_i < SPEC::EPISODE_STATS_N_ENVIRONMENTS){
+                add_scalar(device, device.logger, "episode/length", get(runner.episode_step, 0, env_i), SPEC::EPISODE_STATS_CADENCE);
+                add_scalar(device, device.logger, "episode/return", get(runner.episode_return, 0, env_i), SPEC::EPISODE_STATS_CADENCE);
+            }
             set(runner.truncated, 0, env_i, false);
             set(runner.episode_step, 0, env_i, 0);
             set(runner.episode_return, 0, env_i, 0);
@@ -31,9 +33,9 @@ namespace rl_tools::rl::components::on_policy_runner::per_env{
         }
     }
     template <typename DEVICE, typename DATASET_SPEC, typename ACTIONS_MEAN_SPEC, typename ACTIONS_SPEC, typename ACTION_LOG_STD_SPEC, typename RNG> // todo: make this not PPO but general policy with output distribution
-    void epilogue(DEVICE& device, rl::components::on_policy_runner::Dataset<DATASET_SPEC>& dataset, rl::components::OnPolicyRunner<typename DATASET_SPEC::SPEC>& runner, Matrix<ACTIONS_MEAN_SPEC>& actions_mean, Matrix<ACTIONS_SPEC>& actions, Matrix<ACTION_LOG_STD_SPEC>& action_log_std, RNG& rng, typename DEVICE::index_t pos, typename DEVICE::index_t env_i){
+    RL_TOOLS_FUNCTION_PLACEMENT void epilogue(DEVICE& device, rl::components::on_policy_runner::Dataset<DATASET_SPEC>& dataset, rl::components::OnPolicyRunner<typename DATASET_SPEC::SPEC>& runner, Matrix<ACTIONS_MEAN_SPEC>& actions_mean, Matrix<ACTIONS_SPEC>& actions, Matrix<ACTION_LOG_STD_SPEC>& action_log_std, RNG& rng, typename DEVICE::index_t pos, typename DEVICE::index_t env_i){
         using SPEC = typename DATASET_SPEC::SPEC;
-        using T = typename SPEC::T;
+        using T = typename SPEC::TYPE_POLICY::DEFAULT;
         using TI = typename SPEC::TI;
         constexpr TI N_AGENTS = SPEC::ENVIRONMENT::N_AGENTS;
         constexpr TI ACTION_DIM = SPEC::ENVIRONMENT::ACTION_DIM;
@@ -51,7 +53,7 @@ namespace rl_tools::rl::components::on_policy_runner::per_env{
             static_assert(ACTION_LOG_STD_SPEC::ROWS == 1);
             T current_action_log_std = get(action_log_std, 0, action_i % PER_AGENT_ACTION_DIM);
             T action_std = math::exp(device.math, current_action_log_std);
-            T action_noisy = random::normal_distribution::sample(typename DEVICE::SPEC::RANDOM(), action_mean, action_std, rng);
+            T action_noisy = random::normal_distribution::sample(device.random, action_mean, action_std, rng);
             action_log_prob += random::normal_distribution::log_prob(device.random, action_mean, current_action_log_std, action_noisy);
             set(actions, env_i, action_i, action_noisy);
         }
@@ -70,6 +72,8 @@ namespace rl_tools::rl::components::on_policy_runner::per_env{
         increment(runner.episode_step, 0, env_i, 1);
         bool truncated = terminated_flag || (SPEC::STEP_LIMIT > 0 && get(runner.episode_step, 0, env_i) >= SPEC::STEP_LIMIT);
         set(dataset.truncated, pos, 0, truncated);
+        TI pos_reset = pos + SPEC::N_ENVIRONMENTS; // setting dataset.reset (truncation delayed by one step for the reset of stateful actors and critics)
+        set(dataset.all_reset, pos_reset, 0, truncated);
         set(runner.truncated, 0, env_i, truncated);
         state = next_state;
     }

@@ -1,9 +1,4 @@
 <div align="center">
-  <center><h1><span style="color:#7DB9B6">RLtools</span>: The Fastest Deep Reinforcement Learning Library</h1></center>
-</div>
-
-
-<div align="center">
 <img src="https://github.com/rl-tools/media/blob/master/overview.jpg"/ width=500>  
 </div>
 
@@ -11,11 +6,11 @@
   <a href="https://arxiv.org/abs/2306.03530">Paper on arXiv</a> | <a href="https://rl.tools">Live demo (browser)</a> | <a href="https://docs.rl.tools">Documentation</a> | <a href="https://zoo.rl.tools">Zoo</a> | <a href="https://studio.rl.tools">Studio</a>
   </br>
 </br>
-  <a href="https://github.com/rl-tools/rl-tools/actions/workflows/tests-backend.yml">
-  <img src="https://github.com/rl-tools/rl-tools/actions/workflows/tests-backend.yml/badge.svg" alt="Documentation">
+  <a href="https://github.com/rl-tools/rl-tools/actions/workflows/tests-tier3.yml">
+  <img src="https://github.com/rl-tools/rl-tools/actions/workflows/tests-tier3.yml/badge.svg" alt="Unit Tests">
   </a>
   <a href="https://codecov.io/gh/rl-tools/rl-tools" >
-  <img src="https://codecov.io/gh/rl-tools/rl-tools/graph/badge.svg?token=3TJZ635O8V"/>
+  <img src="https://codecov.io/gh/rl-tools/rl-tools/branch/main/graph/badge.svg?token=3TJZ635O8V"/>
   </a>
   <a href="https://docs.rl.tools">
   <img src="https://img.shields.io/badge/Documentation-Read%20the%20Docs-blue.svg" alt="Documentation">
@@ -98,9 +93,9 @@
 ## Quick Start
 Clone this repo, then build a Zoo example:
 ```
-g++ -std=c++17 -Ofast -I include src/rl/zoo/l2f/sac.cpp
+g++ -std=c++17 -O3 -ffast-math -I include src/rl/zoo/l2f/sac.cpp
 ```
-Run it `./a.out 1337` (number = seed) then run `python3 -m http.server` to visualize the results. Open `http://localhost:8000` and navigate to the ExTrack UI to watch the quadrotor flying. 
+Run it `./a.out 1337` (number = seed) then run `./tools/serve.sh` to visualize the results. Open `http://localhost:8000` and navigate to the ExTrack UI to watch the quadrotor flying. 
 
 - **macOS**: Append `-framework Accelerate -DRL_TOOLS_BACKEND_ENABLE_ACCELERATE` for fast training (~4s on M3)
 - **Ubuntu**: Use `apt install libopenblas-dev` and append `-lopenblas -DRL_TOOLS_BACKEND_ENABLE_OPENBLAS` (~6s on Zen 5).
@@ -121,24 +116,8 @@ Run it `./a.out 1337` (number = seed) then run `python3 -m http.server` to visua
 # Getting Started
 > **⚠️ Note**: Check out [Getting Started](https://docs.rl.tools/getting_started.html) in the documentation for a more thorough guide
 
-Simple example on how to implement your own environment and train a policy using PPO:
+To get started implementing your own environment please refer to [rl-tools/example](https://github.com/rl-tools/example)
 
-Clone and checkout:
-```
-git clone https://github.com/rl-tools/example
-cd example
-git submodule update --init external/rl_tools
-```
-build and run:
-```
-mkdir build
-cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-cmake --build .
-./my_pendulum
-```
-
-Note this example does not have dependencies and should work on any system with CMake and a C++ 17 compiler.
 
 # Documentation
 The documentation is available at [docs.rl.tools](https://docs.rl.tools) and consists of C++ notebooks. You can also run them locally to tinker around:
@@ -183,32 +162,6 @@ After running the Docker container, open the link that is displayed in the CLI (
 
 [//]: # (- [Citing]&#40;#citing&#41;)
 
-# Repository Structure
-To build the examples from source (either in Docker or natively), first the repository should be cloned.
-Instead of cloning all submodules using `git clone --recursive` which takes a lot of space and bandwidth we recommend cloning the main repo containing all the standalone code for <span style="color:#7DB9B6">RLtools</span> and then cloning the required sets of submodules later:
-```
-git clone https://github.com/rl-tools/rl-tools.git rl_tools
-```
-#### Cloning submodules
-There are three classes of submodules:
-1. External dependencies (in `external/`)
-   * E.g. HDF5 for checkpointing, Tensorboard for logging, or MuJoCo for the simulation of contact dynamics
-2. Examples/Code for embedded platforms (in `embedded_platforms/`)
-3. Redistributable dependencies (in `redistributable/`)
-4. Test dependencies (in `tests/lib`)
-4. Test data (in `tests/data`)
-
-These sets of submodules can be cloned incrementally/independent of each other.
-For most use-cases (like e.g. most of the Docker examples) you should clone the submodules for external dependencies:
-```
-cd rl_tools
-```
-```
-git submodule update --init --recursive -- external
-```
-
-The submodules for the embedded platforms, the redistributable binaries and test dependencies/data can be cloned in the same fashion (by replacing `external` with the appropriate folder from the enumeration above). 
-Note: Make sure that for the redistributable dependencies and test data `git-lfs` is installed (e.g. `sudo apt install git-lfs` on Ubuntu) and activated (`git lfs install`) otherwise only the metadata of the blobs is downloaded.
 
 ### Python Interface
 

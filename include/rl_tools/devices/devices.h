@@ -41,12 +41,21 @@ RL_TOOLS_NAMESPACE_WRAPPER_END
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools::devices{
     namespace generic{
+        namespace random{
+            template <typename T_MATH_DEVICE>
+            struct ENGINE{
+                using STATE_TYPE = typename T_MATH_DEVICE::index_t;
+                STATE_TYPE state;
+            };
+        }
     }
     namespace random{
         template <typename T_MATH_DEVICE>
         struct Generic{
             static constexpr Type TYPE = Type::random;
             using MATH_DEVICE = T_MATH_DEVICE;
+            template <typename T_NOTHING = void>
+            using ENGINE = devices::generic::random::ENGINE<MATH_DEVICE>;
         };
     }
     namespace math{
@@ -60,13 +69,13 @@ RL_TOOLS_NAMESPACE_WRAPPER_END
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools{
     template <typename DEV_SPEC>
-    void malloc(devices::Device<DEV_SPEC>& device){};
+    void malloc(devices::Device<DEV_SPEC>& device){}
     template <typename DEV_SPEC>
-    void init(devices::Device<DEV_SPEC>& device){ };
+    void init(devices::Device<DEV_SPEC>& device){}
     template <typename DEV_SPEC, typename T>
-    void count_malloc(devices::Device<DEV_SPEC>& device, T){ };
+    void count_malloc(devices::Device<DEV_SPEC>& device, T){}
     template <typename DEV_SPEC>
-    void free(devices::Device<DEV_SPEC>& device){};
+    void free(devices::Device<DEV_SPEC>& device){}
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END
 

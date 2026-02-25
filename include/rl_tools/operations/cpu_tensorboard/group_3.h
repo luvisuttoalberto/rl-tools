@@ -6,6 +6,9 @@
     #define RL_TOOLS_OPERATIONS_CPU_TENSORBOARD_GROUP_3
     #include "../../containers/matrix/operations_cpu.h"
     #include "../../containers/tensor/operations_cpu.h"
+    #ifdef RL_TOOLS_ENABLE_HDF5
+        #include "../../persist/backends/hdf5/operations_cpu.h"
+    #endif
 #else
     #error "Group 3 already imported"
 #endif

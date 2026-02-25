@@ -23,7 +23,7 @@
 //struct TrainingConfig{
 //    using T = float;
 //    using TI = typename DEVICE::index_t;
-//    using RNG = decltype(rlt::random::default_engine(typename DEVICE::SPEC::RANDOM{}));
+//    using RNG = DEVICE::SPEC::RANDOM::ENGINE<>;
 //
 //    using PENDULUM_SPEC = rlt::rl::environments::pendulum::Specification<T, TI, rlt::rl::environments::pendulum::DefaultParameters<T>>;
 //    using ENVIRONMENT = rlt::rl::environments::Pendulum<PENDULUM_SPEC> ;
@@ -129,7 +129,7 @@
 //    using TRAINING_CONFIG = typename TRAINING_STATE::TRAINING_CONFIG;
 //
 //
-//    ts.rng = rlt::random::default_engine(typename DEVICE::SPEC::RANDOM(), seed);
+//    ts.rng = rlt::random::default_engine(DEVICE{}, seed);
 //
 //    rlt::malloc(device, ts.actor_critic);
 //    rlt::init(device, ts.actor_critic, ts.rng);
@@ -255,14 +255,15 @@
 namespace rlt = rl_tools;
 
 using DEVICE = rlt::devices::DEVICE_FACTORY<>;
-using RNG = decltype(rlt::random::default_engine(typename DEVICE::SPEC::RANDOM{}));
+using RNG = DEVICE::SPEC::RANDOM::ENGINE<>;
 using T = float;
+using TYPE_POLICY = rlt::numeric_types::Policy<T>;
 using TI = typename DEVICE::index_t;
 
 using PENDULUM_SPEC = rlt::rl::environments::pendulum::Specification<T, TI, rlt::rl::environments::pendulum::DefaultParameters<T>>;
 using ENVIRONMENT = rlt::rl::environments::Pendulum<PENDULUM_SPEC>;
-struct LOOP_CORE_PARAMETERS: rlt::rl::algorithms::sac::loop::core::DefaultParameters<T, TI, ENVIRONMENT>{
-    struct SAC_PARAMETERS: rlt::rl::algorithms::sac::DefaultParameters<T, TI, ENVIRONMENT::ACTION_DIM>{
+struct LOOP_CORE_PARAMETERS: rlt::rl::algorithms::sac::loop::core::DefaultParameters<TYPE_POLICY, TI, ENVIRONMENT>{
+    struct SAC_PARAMETERS: rlt::rl::algorithms::sac::DefaultParameters<TYPE_POLICY, TI, ENVIRONMENT::ACTION_DIM>{
         static constexpr TI ACTOR_BATCH_SIZE = 100;
         static constexpr TI CRITIC_BATCH_SIZE = 100;
     };
@@ -273,18 +274,20 @@ struct LOOP_CORE_PARAMETERS: rlt::rl::algorithms::sac::loop::core::DefaultParame
     static constexpr TI ACTOR_HIDDEN_DIM = 64;
     static constexpr TI CRITIC_HIDDEN_DIM = 64;
 #else
-    static constexpr TI ACTOR_HIDDEN_DIM = 32;
-    static constexpr TI CRITIC_HIDDEN_DIM = 32;
+    static constexpr TI ACTOR_HIDDEN_DIM = 64;
+    static constexpr TI CRITIC_HIDDEN_DIM = 64;
 #endif
+    static constexpr T ALPHA = 1.0;
+    static constexpr TI N_ENVIRONMENTS = 1;
 };
 #ifdef BENCHMARK
 using LOOP_CORE_CONFIG = rlt::rl::algorithms::sac::loop::core::Config<T, TI, RNG, ENVIRONMENT, LOOP_CORE_PARAMETERS>;
 using LOOP_TIMING_CONFIG = rlt::rl::loop::steps::timing::Config<LOOP_CORE_CONFIG>;
 using LOOP_CONFIG = LOOP_TIMING_CONFIG;
 #else
-using RNG = decltype(rlt::random::default_engine(typename DEVICE::SPEC::RANDOM{}));
-using LOOP_CORE_CONFIG = rlt::rl::algorithms::sac::loop::core::Config<T, TI, RNG, ENVIRONMENT, LOOP_CORE_PARAMETERS, rlt::rl::algorithms::sac::loop::core::ConfigApproximatorsMLP>;
-struct LOOP_EVAL_PARAMETERS: rlt::rl::loop::steps::evaluation::Parameters<T, TI, LOOP_CORE_CONFIG>{
+using RNG = DEVICE::SPEC::RANDOM::ENGINE<>;
+using LOOP_CORE_CONFIG = rlt::rl::algorithms::sac::loop::core::Config<TYPE_POLICY, TI, RNG, ENVIRONMENT, LOOP_CORE_PARAMETERS, rlt::rl::algorithms::sac::loop::core::ConfigApproximatorsMLP>;
+struct LOOP_EVAL_PARAMETERS: rlt::rl::loop::steps::evaluation::Parameters<TYPE_POLICY, TI, LOOP_CORE_CONFIG>{
     static constexpr TI EVALUATION_EPISODES = 100;
 };
 using LOOP_EVAL_CONFIG = rlt::rl::loop::steps::evaluation::Config<LOOP_CORE_CONFIG, LOOP_EVAL_PARAMETERS>;

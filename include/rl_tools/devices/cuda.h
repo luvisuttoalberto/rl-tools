@@ -5,9 +5,13 @@
 
 #include "../rl_tools.h"
 #include "../utils/generic/typing.h"
+#include "../containers/matrix/matrix.h"
 #include "devices.h"
 #include "cpu.h"
 #include <cublas_v2.h>
+#include <vector>
+#include <unordered_map>
+#include <curand_kernel.h>
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools::devices{
     namespace cuda{
@@ -25,6 +29,18 @@ namespace rl_tools::devices{
     namespace random{
         struct CUDA:devices::random::Generic<devices::math::CUDA>, cuda::Base{
             static constexpr Type TYPE = Type::random;
+            template <typename T_TI, T_TI T_NUM_RNGS, typename T_CURAND_TYPE=curandState>
+            struct Specification{
+                using TI = T_TI;
+                static constexpr TI NUM_RNGS = T_NUM_RNGS;
+                using CURAND_TYPE = T_CURAND_TYPE;
+            };
+            template <typename SPEC = Specification<cuda::Base::index_t, 1024>>
+            struct ENGINE{
+                using TI = typename SPEC::TI;
+                static constexpr TI NUM_RNGS = SPEC::NUM_RNGS;
+                Matrix<matrix::Specification<typename SPEC::CURAND_TYPE, TI, 1, NUM_RNGS, true>> states;
+            };
         };
     }
     namespace logging{
@@ -40,7 +56,8 @@ namespace rl_tools::devices{
             using SPEC = T_SPEC;
             typename SPEC::LOGGING* logger = nullptr;
             cublasHandle_t handle;
-            cudaStream_t stream = 0;
+            bool graph_capture_active = false;
+            cudaStream_t stream;
 #ifdef RL_TOOLS_DEBUG_CONTAINER_COUNT_MALLOC
             index_t malloc_counter = 0;
 #endif
@@ -74,6 +91,23 @@ namespace rl_tools::devices{
 #endif
         using TAG = _TAG<DEVICE, KERNEL>;
 
+        struct CUDA_KERNEL_SPEC{
+            struct RANDOM{
+                template <typename T_ENGINE = curandState>
+                using ENGINE = T_ENGINE;
+            };
+            using MATH = devices::math::CUDA;
+            using LOGGING = logging::CUDA;
+        };
+        template <typename T_SPEC>
+        struct CUDA_KERNEL{
+            using SPEC = T_SPEC;
+            using index_t = unsigned int;
+            devices::random::CUDA random;
+            typename SPEC::MATH math;
+            typename SPEC::LOGGING* logger = nullptr;
+        };
+
     }
 
     struct DefaultCUDASpecification{
@@ -94,15 +128,29 @@ RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools {
     template <typename SPEC>
     void init(devices::CUDA<SPEC>& device){
-        cublasStatus_t stat;
-        stat = cublasCreate(&device.handle);
+        cudaError_t stat;
+        stat = cudaStreamCreate(&device.stream);
+        if (stat != cudaSuccess) {
+//            log(device.logger, (const char*)"CUBLAS initialization failed ", cublasGetStatusString(stat));
+            std::cout << "CUDA Stream initialization failed " << cudaGetErrorString(stat) << std::endl;
+        }
+        cublasStatus_t cublas_stat;
+        cublas_stat = cublasCreate(&device.handle);
+        if (cublas_stat != CUBLAS_STATUS_SUCCESS) {
+//            log(device.logger, (const char*)"CUBLAS initialization failed ", cublasGetStatusString(stat));
+            std::cout << "CUBLAS initialization failed " << cublasGetStatusString(cublas_stat) << std::endl;
+        }
+        cublas_stat = cublasSetStream(device.handle, device.stream);
+        if (cublas_stat != CUBLAS_STATUS_SUCCESS) {
+//            log(device.logger, (const char*)"CUBLAS initialization failed ", cublasGetStatusString(stat));
+            std::cout << "CUBLAS setting stream failed " << cublasGetStatusString(cublas_stat) << std::endl;
+        }
 #ifdef RL_TOOLS_DEBUG_DEVICE_CUDA_CHECK_INIT
+        if(device.initialized){
+            std::cerr << "CUDA device already initialized" << std::endl;
+        }
         device.initialized = true;
 #endif
-        if (stat != CUBLAS_STATUS_SUCCESS) {
-//            log(device.logger, (const char*)"CUBLAS initialization failed ", cublasGetStatusString(stat));
-            std::cout << "CUBLAS initialization failed " << cublasGetStatusString(stat) << std::endl;
-        }
     }
     template <typename SPEC>
     void check_status(devices::CUDA<SPEC>& device){
@@ -112,20 +160,100 @@ namespace rl_tools {
         }
 #endif
 #ifdef RL_TOOLS_DEBUG_DEVICE_CUDA_SYNCHRONIZE_STATUS_CHECK
-        cudaDeviceSynchronize();
-#endif
+        if (!device.graph_capture_active){
+            cudaDeviceSynchronize();
+            cudaStreamSynchronize(device.stream);
+        }
         cudaError_t cudaStatus = cudaGetLastError();
-        if (cudaStatus != cudaSuccess) {
+        if (cudaStatus != cudaSuccess){
             std::string error_string = cudaGetErrorString(cudaStatus);
             std::cerr << "cuda failed: " << error_string << std::endl;
             std::exit(100);
         }
+#endif
     }
     template <typename DEV_SPEC, typename TI>
     void count_malloc(devices::CUDA<DEV_SPEC>& device, TI size){
 #ifdef RL_TOOLS_DEBUG_CONTAINER_COUNT_MALLOC
         device.malloc_counter += size;
 #endif
+    }
+
+    void print_graph(cudaGraph_t graph){
+
+        // Step 8: Retrieve and list nodes and dependencies
+        // Get all nodes
+        size_t numNodes = 0;
+        cudaGraphGetNodes(graph, nullptr, &numNodes);
+        std::vector<cudaGraphNode_t> nodes(numNodes);
+        cudaGraphGetNodes(graph, nodes.data(), &numNodes);
+
+        // Assign indices to nodes
+        std::unordered_map<cudaGraphNode_t, int> nodeMap;
+        for(int i = 0; i < numNodes; ++i){
+            nodeMap[nodes[i]] = i;
+        }
+
+        // Get all edges (dependencies)
+        size_t numEdges = 0;
+#if CUDART_VERSION >= 12030
+        cudaGraphGetEdges(graph, nullptr, nullptr, nullptr, &numEdges);
+#else
+        cudaGraphGetEdges(graph, nullptr, nullptr, &numEdges);
+#endif
+        std::vector<cudaGraphNode_t> srcNodes(numEdges);
+        std::vector<cudaGraphNode_t> dstNodes(numEdges);
+        if(numEdges > 0){
+#if CUDART_VERSION >= 12030
+            cudaGraphGetEdges(graph, srcNodes.data(), dstNodes.data(), nullptr, &numEdges);
+#else
+            cudaGraphGetEdges(graph, srcNodes.data(), dstNodes.data(), &numEdges);
+#endif
+        }
+
+        // Map dependencies: destination node -> list of source nodes
+        std::vector<std::vector<int>> dependencies(numNodes, std::vector<int>());
+        for(int i = 0; i < numEdges; ++i){
+            int src = nodeMap[srcNodes[i]];
+            int dst = nodeMap[dstNodes[i]];
+            dependencies[dst].push_back(src);
+        }
+
+        // Print nodes and their dependencies
+        std::cout << "CUDA Graph Nodes and Dependencies:\n";
+        for(int i = 0; i < numNodes; ++i){
+            std::cout << "Node " << i << ": ";
+            cudaGraphNodeType nodeType;
+            cudaGraphNodeGetType(nodes[i], &nodeType);
+
+            std::string typeName;
+            switch(nodeType){
+            case cudaGraphNodeTypeKernel:
+                typeName = "Kernel";
+                break;
+            case cudaGraphNodeTypeMemcpy:
+                typeName = "Memcpy";
+                break;
+            case cudaGraphNodeTypeMemset:
+                typeName = "Memset";
+                break;
+                // Add other cases as needed
+            default:
+                typeName = "Other";
+                break;
+            }
+            std::cout << typeName << " ";
+            if(dependencies[i].empty()){
+                std::cout << "No dependencies";
+            }
+            else{
+                std::cout << "Depends on Node(s): ";
+                for(auto &dep : dependencies[i]){
+                    std::cout << dep << " ";
+                }
+            }
+            std::cout << "\n";
+        }
     }
 
 }

@@ -9,6 +9,8 @@ namespace rl_tools::rl::loop::steps::checkpoint{
     struct State: T_NEXT {
         using CONFIG = T_CONFIG;
         using NEXT = T_NEXT;
+        typename CONFIG::RNG rng_checkpoint;
+        bool checkpoint_this_step = false;
     };
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END

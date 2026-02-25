@@ -5,26 +5,26 @@
 
 #include "../../nn/parameters/parameters.h"
 
-#include <highfive/H5Group.hpp>
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools{
-    template<typename DEVICE, typename CONTAINER>
-    void save(DEVICE& device, nn::parameters::Plain::instance<CONTAINER>& parameter, HighFive::Group group) {
+    template<typename DEVICE, typename SPEC, typename GROUP>
+    void save(DEVICE& device, nn::parameters::Plain::Instance<SPEC>& parameter, GROUP& group) {
         save(device, parameter.parameters, group, "parameters");
     }
-    template<typename DEVICE, typename CONTAINER>
-    void save(DEVICE& device, nn::parameters::Gradient::instance<CONTAINER>& parameter, HighFive::Group group) {
-        save(device, (nn::parameters::Plain::instance<CONTAINER>&)parameter, group);
+    template<typename DEVICE, typename SPEC, typename GROUP>
+    void save(DEVICE& device, nn::parameters::Gradient::Instance<SPEC>& parameter, GROUP& group) {
+        save(device, (nn::parameters::Plain::Instance<SPEC>&)parameter, group);
         save(device, parameter.gradient, group, "gradient");
     }
-    template<typename DEVICE, typename CONTAINER>
-    void load(DEVICE& device, nn::parameters::Plain::instance<CONTAINER>& parameter, HighFive::Group group) {
-        load(device, parameter.parameters, group, "parameters");
+    template<typename DEVICE, typename SPEC, typename GROUP>
+    bool load(DEVICE& device, nn::parameters::Plain::Instance<SPEC>& parameter, GROUP& group) {
+        return load(device, parameter.parameters, group, "parameters");
     }
-    template<typename DEVICE, typename CONTAINER>
-    void load(DEVICE& device, nn::parameters::Gradient::instance<CONTAINER>& parameter, HighFive::Group group) {
-        load(device, (nn::parameters::Plain::instance<CONTAINER>&)parameter, group);
-        load(device, parameter.gradient, group, "gradient");
+    template<typename DEVICE, typename SPEC, typename GROUP>
+    bool load(DEVICE& device, nn::parameters::Gradient::Instance<SPEC>& parameter, GROUP& group) {
+        bool success = load(device, (nn::parameters::Plain::Instance<SPEC>&)parameter, group);
+        success &= load(device, parameter.gradient, group, "gradient");
+        return success;
     }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END

@@ -26,8 +26,8 @@
 #include <rl_tools/nn/optimizers/adam/operations_generic.h>
 
 #ifdef RL_TOOLS_ENABLE_HDF5
-#include <rl_tools/containers/matrix/persist.h>
-#include <rl_tools/containers/tensor/persist.h>
+
+
 #include <rl_tools/nn/optimizers/adam/instance/persist.h>
 #include <rl_tools/nn/layers/sample_and_squash/persist.h>
 #include <rl_tools/nn/layers/standardize/persist.h>
@@ -54,8 +54,9 @@ using DEVICE = rlt::devices::DEVICE_FACTORY<>;
 #else
 using DEVICE = rlt::devices::DefaultCPU;
 #endif
-using RNG = decltype(rlt::random::default_engine(typename DEVICE::SPEC::RANDOM{}));
+using RNG = DEVICE::SPEC::RANDOM::ENGINE<>;
 using T = float;
+using TYPE_POLICY = rlt::numeric_types::Policy<T>;
 using TI = typename DEVICE::index_t;
 
 #include "parameters.h"
@@ -69,16 +70,17 @@ int main(){
     TI seed = 1;
     DEVICE device;
     LOOP_STATE ts;
-    ts.extrack_name = "sequential";
-    ts.extrack_population_variates = "algorithm_environment";
-    ts.extrack_population_values = "td3_memory";
+    ts.extrack_config.name = "sequential";
+    ts.extrack_config.population_variates = "algorithm_environment";
+    ts.extrack_config.population_values = "td3_memory";
     rlt::malloc(device);
     rlt::init(device);
     rlt::malloc(device, ts);
     rlt::init(device, ts, seed);
-    auto myrng = rlt::random::default_engine(device.random, seed);
+    RNG myrng;
+    rlt::init(device, myrng, seed);
 #ifdef RL_TOOLS_ENABLE_TENSORBOARD
-    rlt::init(device, device.logger, ts.extrack_seed_path);
+    rlt::init(device, device.logger, ts.extrack_paths.seed);
 #endif
     bool done = false;
     while(!done){
@@ -97,7 +99,7 @@ int main(){
             rlt::Tensor<rlt::tensor::Specification<T, TI, rlt::tensor::Shape<TI, TEST_SEQUENCE_LENGTH, 1, 2>>> test_critic_input;
             rlt::Tensor<rlt::tensor::Specification<T, TI, rlt::tensor::Shape<TI, TEST_SEQUENCE_LENGTH, 1, 1>>> test_critic_output;
             using EVALUATION_ACTOR = decltype(ts.actor_critic.actor)::CHANGE_BATCH_SIZE<TI, 1>;
-            using EVALUATION_CRITIC = decltype(ts.actor_critic.critic_1)::CHANGE_BATCH_SIZE<TI, 1>;
+            using EVALUATION_CRITIC = rlt::utils::typing::remove_reference_t<decltype(ts.actor_critic.critics[0])>::CHANGE_BATCH_SIZE<TI, 1>;
             EVALUATION_ACTOR::Buffer<1> actor_buffer;
             EVALUATION_CRITIC::Buffer<1> critic_buffer;
             rlt::malloc(device, test_critic_input);
@@ -135,16 +137,16 @@ int main(){
                     rlt::set(device, test_critic_input, (T)input_i, TEST_SEQUENCE_LENGTH-1, 0, 0);
                     TI count = pre_count + input_i;
                     // line search
-                    T max_value;
+                    T max_value = 0;
                     bool max_value_set = false;
-                    TI max_action;
+                    TI max_action = 0;
                     for(TI action_i = 0; action_i < 5; action_i++){
                         T action = ((T)action_i)/10;
                         rlt::set(device, test_critic_input, action, TEST_SEQUENCE_LENGTH-1, 0, 1);
 //                    rlt::utils::assert_exit(device, rlt::get(device, test_critic_input, TEST_SEQUENCE_LENGTH-2, 0, 0) + rlt::get(device, test_critic_input, TEST_SEQUENCE_LENGTH-1, 0, 0) == count, "Count mismatch");
 //                    rlt::print(device, test_critic_input);
                         rlt::evaluate(device, ts.actor_critic.actor, test_actor_input, test_actor_output, actor_buffer, myrng, mode); // to calculate the missing action
-                        rlt::evaluate(device, ts.actor_critic.critic_1, test_critic_input, test_critic_output, critic_buffer, myrng, mode);
+                        rlt::evaluate(device, ts.actor_critic.critics[0], test_critic_input, test_critic_output, critic_buffer, myrng, mode);
                         T value = rlt::get(device, test_critic_output, TEST_SEQUENCE_LENGTH-1, 0, 0);
                         if(!max_value_set || value > max_value){
                             max_value = value;

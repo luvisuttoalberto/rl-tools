@@ -8,16 +8,20 @@
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools::rl::components{
     namespace on_policy_runner{
-        template <typename T_T, typename T_TI, typename T_ENVIRONMENT, T_TI T_N_ENVIRONMENTS = 1, T_TI T_STEP_LIMIT = 0, T_TI T_N_AGENTS_PER_ENV = 1, bool T_DYNAMIC_ALLOCATION=true>
+        template <typename T_TYPE_POLICY, typename T_TI, typename T_ENVIRONMENT, typename T_POLICY_STATE, T_TI T_N_ENVIRONMENTS = 1, T_TI T_STEP_LIMIT = 0, T_TI T_N_AGENTS_PER_ENV = 1, bool T_TRUNCATE_ON_EACH_ITERATION = false, bool T_DYNAMIC_ALLOCATION=true>
         struct Specification{
-            using T = T_T;
+            using TYPE_POLICY = T_TYPE_POLICY;
             using TI = T_TI;
             using ENVIRONMENT = T_ENVIRONMENT;
+            using POLICY_STATE = T_POLICY_STATE;
             static constexpr TI N_ENVIRONMENTS = T_N_ENVIRONMENTS;
             static constexpr TI STEP_LIMIT = T_STEP_LIMIT;
             static constexpr bool ASYMMETRIC_OBSERVATIONS = !rl_tools::utils::typing::is_same_v<typename ENVIRONMENT::Observation, typename ENVIRONMENT::ObservationPrivileged>;
             static constexpr TI N_AGENTS_PER_ENV = T_N_AGENTS_PER_ENV; // 1 for single agent, >1 for multi-agent
             static constexpr bool DYANMIC_ALLOCATION = T_DYNAMIC_ALLOCATION;
+            static constexpr TI EPISODE_STATS_N_ENVIRONMENTS = 1;
+            static constexpr TI EPISODE_STATS_CADENCE = 10000;
+            static constexpr bool TRUNCATE_ON_EACH_ITERATION = T_TRUNCATE_ON_EACH_ITERATION;
         };
 
         template <typename T_SPEC, typename T_SPEC::TI T_STEPS_PER_ENV, bool T_DYNAMIC_ALLOCATION = true>
@@ -35,12 +39,13 @@ namespace rl_tools::rl::components{
         struct Dataset{
             using DATASET_SPEC = T_DATASET_SPEC;
             using SPEC = typename DATASET_SPEC::SPEC;
-            using T = typename SPEC::T;
+            using TYPE_POLICY = typename SPEC::TYPE_POLICY;
+            using T = typename TYPE_POLICY::DEFAULT;
             using TI = typename SPEC::TI;
             static constexpr TI STEPS_PER_ENV = DATASET_SPEC::STEPS_PER_ENV;
             static constexpr TI STEPS_TOTAL = DATASET_SPEC::STEPS_TOTAL;
-            // structure: OBSERVATION_PRIVILIGED_DIM + OBSERVATION_DIM + ACTIONS + ACTIONS_MEAN + ACTION_LOG_P + REWARD + TERMINATED + TRUNCATED + VALUE + ADVANTAGE + TARGET_VALUE
-            static constexpr TI DATA_DIM = (SPEC::ASYMMETRIC_OBSERVATIONS ? SPEC::ENVIRONMENT::ObservationPrivileged::DIM : 0) + SPEC::ENVIRONMENT::Observation::DIM + SPEC::ENVIRONMENT::ACTION_DIM * 2 + 7;
+            // structure: OBSERVATION_PRIVILIGED_DIM + OBSERVATION_DIM + ACTIONS + ACTIONS_MEAN + ACTION_LOG_P + REWARD + TERMINATED + TRUNCATED + RESET + VALUE + ADVANTAGE + TARGET_VALUE
+            static constexpr TI DATA_DIM = (SPEC::ASYMMETRIC_OBSERVATIONS ? SPEC::ENVIRONMENT::ObservationPrivileged::DIM : 0) + SPEC::ENVIRONMENT::Observation::DIM + SPEC::ENVIRONMENT::ACTION_DIM * 2 + 8;
 
             // mem
             // todo: evaluate transposing this / storing in column major order for better memory access in the single dimensional columns
@@ -58,6 +63,8 @@ namespace rl_tools::rl::components{
             DATA_VIEW<1> rewards;
             DATA_VIEW<1> terminated;
             DATA_VIEW<1> truncated;
+            DATA_VIEW<1, true> all_reset;
+            DATA_VIEW<1> reset; // = truncation delayed by one step for the reset of stateful actors and critics
             DATA_VIEW<1, true> all_values;
             DATA_VIEW<1> values;
             DATA_VIEW<1> advantages;
@@ -72,17 +79,19 @@ namespace rl_tools::rl::components{
     template <typename T_SPEC>
     struct OnPolicyRunner{
         using SPEC = T_SPEC;
-        using T = typename SPEC::T;
+        using TYPE_POLICY = typename SPEC::TYPE_POLICY;
         using TI = typename SPEC::TI;
 
         TI step = 0;
+
+        typename SPEC::POLICY_STATE policy_state;
 
         Matrix<matrix::Specification<typename SPEC::ENVIRONMENT            , TI, 1, SPEC::N_ENVIRONMENTS, SPEC::DYANMIC_ALLOCATION>> environments;
         Matrix<matrix::Specification<typename SPEC::ENVIRONMENT::Parameters, TI, 1, SPEC::N_ENVIRONMENTS, SPEC::DYANMIC_ALLOCATION>> env_parameters;
         Matrix<matrix::Specification<typename SPEC::ENVIRONMENT::State     , TI, 1, SPEC::N_ENVIRONMENTS, SPEC::DYANMIC_ALLOCATION>> states;
         Matrix<matrix::Specification<bool                                  , TI, 1, SPEC::N_ENVIRONMENTS, SPEC::DYANMIC_ALLOCATION>> truncated;
         Matrix<matrix::Specification<TI                                    , TI, 1, SPEC::N_ENVIRONMENTS, SPEC::DYANMIC_ALLOCATION>> episode_step;
-        Matrix<matrix::Specification<T                                     , TI, 1, SPEC::N_ENVIRONMENTS, SPEC::DYANMIC_ALLOCATION>> episode_return;
+        Matrix<matrix::Specification<typename TYPE_POLICY::DEFAULT         , TI, 1, SPEC::N_ENVIRONMENTS, SPEC::DYANMIC_ALLOCATION>> episode_return;
 #ifdef RL_TOOLS_DEBUG_RL_COMPONENTS_ON_POLICY_RUNNER_CHECK_INIT
         bool initialized = false;
 #endif

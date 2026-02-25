@@ -32,10 +32,11 @@ namespace builder {
     using namespace rlt::rl::environments::l2f;
     using namespace rlt::rl::environments::l2f::observation;
     struct ENVIRONMENT_STATIC_PARAMETERS{
+        static constexpr TI_GPU N_SUBSTEPS = 1;
         static constexpr TI_GPU ACTION_HISTORY_LENGTH = 16;
         static constexpr TI_GPU CLOSED_FORM = false;
-        using STATE_BASE = StateBase<T, TI_GPU>;
-        using STATE_TYPE = StateRotors<T, TI_GPU, CLOSED_FORM, StateRandomForce<T, TI_GPU, STATE_BASE>>;
+        using STATE_BASE = StateBase<StateSpecification<T, TI_GPU>>;
+        using STATE_TYPE = StateRotors<StateRotorsSpecification<T, TI_GPU, CLOSED_FORM, StateRandomForce<StateSpecification<T, TI_GPU, STATE_BASE>>>>;
         using OBSERVATION_TYPE =
             Position<PositionSpecification<T, TI_GPU,
             OrientationRotationMatrix<OrientationRotationMatrixSpecification<T, TI_GPU,
@@ -49,9 +50,12 @@ namespace builder {
             RandomForce<RandomForceSpecification<T, TI_GPU,
             RotorSpeeds<RotorSpeedsSpecification<T, TI_GPU>>>>>>>>>>>>;
         static constexpr bool PRIVILEGED_OBSERVATION_NOISE = false;
-        using DEFAULT_STUB = parameters::DefaultParameters<T, TI_GPU>;
+        using DEFAULT_STUB = parameters::DEFAULT_PARAMETERS_FACTORY<T, TI_GPU>;
         using PARAMETERS = DEFAULT_STUB::PARAMETERS_TYPE;
-        static constexpr auto PARAMETER_VALUES = DEFAULT_STUB::parameters;
+        static constexpr auto PARAMETER_VALUES = DEFAULT_STUB::nominal_parameters;
+        static constexpr T STATE_LIMIT_POSITION = 100000;
+        static constexpr T STATE_LIMIT_VELOCITY = 100000;
+        static constexpr T STATE_LIMIT_ANGULAR_VELOCITY = 100000;
     };
 }
 
@@ -103,7 +107,7 @@ simulate_parallel(DEVICE& device, const ENVIRONMENT* envs, ENVIRONMENT::Paramete
     __shared__ ENVIRONMENT this_env;
     __shared__ ENVIRONMENT::Parameters this_parameters;
     if(thread_id == 0){
-        this_env = envs[block_id * SPEC_SIMULATE::BLOCK_DIM];
+        this_env = envs[block_id];
         this_parameters = parameters[block_id * SPEC_SIMULATE::BLOCK_DIM];
     }
     __syncthreads();
@@ -150,7 +154,10 @@ int main(void) {
 
     DEVICE_CPU device_cpu;
 
-    auto rng = rlt::random::default_engine(device_cpu.random, 0);
+    DEVICE_CPU::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device_cpu, rng);
+    rlt::init(device_cpu, rng, 0);
+
 
     ENVIRONMENT* envs_cpu = (ENVIRONMENT*)malloc(sizeof(ENVIRONMENT) * N_BLOCKS * N_THREADS);
     ENVIRONMENT::Parameters* parameters_cpu = (ENVIRONMENT::Parameters*)malloc(sizeof(ENVIRONMENT::Parameters) * N_BLOCKS * N_THREADS);

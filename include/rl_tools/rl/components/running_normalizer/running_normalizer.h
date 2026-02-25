@@ -6,22 +6,25 @@
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools::rl::components{
     namespace running_normalizer{
-        template <typename T_T, typename T_TI, T_TI T_DIM>
+        template <typename T_TYPE_POLICY, typename T_TI, T_TI T_DIM, bool T_DYNAMIC_ALLOCATION=true>
         struct Specification{
-            using T = T_T;
+            using TYPE_POLICY = T_TYPE_POLICY;
             using TI = T_TI;
             static constexpr TI DIM = T_DIM;
+            static constexpr bool DYNAMIC_ALLOCATION = T_DYNAMIC_ALLOCATION;
         };
     }
     template <typename T_SPEC>
     struct RunningNormalizer{
         using SPEC = T_SPEC;
-        using T = typename SPEC::T;
+        using TYPE_POLICY = typename SPEC::TYPE_POLICY;
         using TI = typename SPEC::TI;
         static constexpr TI DIM = SPEC::DIM;
+        static constexpr bool DYNAMIC_ALLOCATION = SPEC::DYNAMIC_ALLOCATION;
 
-        Matrix<matrix::Specification<T, TI, 1, DIM>> mean;
-        Matrix<matrix::Specification<T, TI, 1, DIM>> std;
+        using T = typename TYPE_POLICY::DEFAULT;
+        Matrix<matrix::Specification<T, TI, 1, DIM, DYNAMIC_ALLOCATION>> mean;
+        Matrix<matrix::Specification<T, TI, 1, DIM, DYNAMIC_ALLOCATION>> std;
         TI age = 0;
     };
 }

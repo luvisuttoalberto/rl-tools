@@ -50,11 +50,24 @@ namespace rl_tools{
             else{
                 return utils::typing::is_same_v<MODE<typename INPUT::BASE, typename INPUT::SPEC>, INPUT> || _is<typename INPUT::BASE, MODE>();
             }
-        };
+        }
 
         template <typename INPUT, template <typename, typename> typename MODE>
         constexpr bool is = _is<INPUT, MODE>();
 
+        namespace sequential{
+            template <typename T_RESET_CONTAINER_TYPE>
+            struct ResetMaskSpecification{
+                using RESET_CONTAINER_TYPE = T_RESET_CONTAINER_TYPE;
+            };
+            template <typename T_BASE, typename T_SPEC>
+            struct ResetMask: T_BASE{
+                using SPEC = T_SPEC;
+                using BASE = T_BASE;
+                typename SPEC::RESET_CONTAINER_TYPE mask;
+            };
+
+        }
     }
 
 }

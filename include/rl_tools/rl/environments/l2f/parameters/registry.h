@@ -5,10 +5,13 @@
 
 #include "dynamics/crazyflie.h"
 #include "dynamics/mrs.h"
-#include "dynamics/race.h"
+#include "dynamics/arpl.h"
 #include "dynamics/x500_real.h"
 #include "dynamics/x500_sim.h"
 #include "dynamics/fs.h"
+#include "dynamics/flightmare.h"
+#include "dynamics/soft.h"
+#include "dynamics/soft_rigid.h"
 
 
 RL_TOOLS_NAMESPACE_WRAPPER_START
@@ -19,20 +22,32 @@ namespace rl_tools::rl::environments::l2f::parameters{
             mrs,
             x500_real,
             x500_sim,
-            fs_base
+            arpl,
+            fs_base,
+            flightmare,
+            soft,
+            soft_rigid,
         };
-        template <typename SPEC>
+        template <REGISTRY MODEL, typename SPEC>
         constexpr auto registry = [](){
-            if constexpr (SPEC::MODEL == REGISTRY::crazyflie){
-                return dynamics::crazy_flie<SPEC>;
-            }else if constexpr (SPEC::MODEL == REGISTRY::mrs){
-                return dynamics::mrs<SPEC>;
-            }else if constexpr (SPEC::MODEL == REGISTRY::x500_real){
-                return dynamics::x500::real<SPEC>;
-            }else if constexpr (SPEC::MODEL == REGISTRY::x500_sim){
-                return dynamics::x500::sim<SPEC>;
-            }else if constexpr (SPEC::MODEL == REGISTRY::fs_base){
-                return dynamics::fs::base<SPEC>;
+            if constexpr (MODEL == REGISTRY::crazyflie){
+                return dynamics::crazyflie<typename SPEC::T, typename SPEC::TI>;
+            }else if constexpr (MODEL == REGISTRY::mrs){
+                return dynamics::mrs<typename SPEC::T, typename SPEC::TI>;
+            }else if constexpr (MODEL == REGISTRY::x500_real){
+                return dynamics::x500::real<typename SPEC::T, typename SPEC::TI>;
+            }else if constexpr (MODEL == REGISTRY::x500_sim){
+                return dynamics::x500::sim<typename SPEC::T, typename SPEC::TI>;
+            }else if constexpr (MODEL == REGISTRY::arpl){
+                return dynamics::arpl<typename SPEC::T, typename SPEC::TI>;
+            }else if constexpr (MODEL == REGISTRY::fs_base){
+                return dynamics::fs::base<typename SPEC::T, typename SPEC::TI>;
+            }else if constexpr (MODEL == REGISTRY::flightmare){
+                return dynamics::flightmare<typename SPEC::T, typename SPEC::TI>;
+            }else if constexpr (MODEL == REGISTRY::soft){
+                return dynamics::soft<typename SPEC::T, typename SPEC::TI>;
+            }else if constexpr (MODEL == REGISTRY::soft_rigid){
+                return dynamics::soft_rigid<typename SPEC::T, typename SPEC::TI>;
             }else{
                 static_assert(rl_tools::utils::typing::dependent_false<SPEC>, "Unknown model");
             }
@@ -53,6 +68,12 @@ namespace rl_tools::rl::environments::l2f::parameters{
                 return "x500_sim";
             }else if constexpr (MODEL == REGISTRY::fs_base){
                 return "fs_base";
+            }else if constexpr (MODEL == REGISTRY::flightmare){
+                return "flightmare";
+            }else if constexpr (MODEL == REGISTRY::soft){
+                return "soft";
+            }else if constexpr (MODEL == REGISTRY::soft_rigid){
+                return "soft_rigid";
             }else{
                 static_assert(rl_tools::utils::typing::dependent_false<Dependent<MODEL>>, "Unknown model");
             }

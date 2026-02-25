@@ -43,8 +43,9 @@ using DEVICE = rlt::devices::arm::OPT<rlt::devices::arm::Specification<rlt::devi
 using DEVICE = rlt::devices::DefaultCPU;
 #endif
 
-using RNG = decltype(rlt::random::default_engine(typename DEVICE::SPEC::RANDOM{}));
+using RNG = DEVICE::SPEC::RANDOM::ENGINE<>;
 using T = float;
+using TYPE_POLICY = rlt::numeric_types::Policy<T>;
 using TI = typename DEVICE::index_t;
 
 #ifndef RL_TOOLS_DEPLOYMENT_ARDUINO
@@ -55,8 +56,8 @@ constexpr bool DYNAMIC_ALLOCATION_LOOP_STATE = false;
 
 using PENDULUM_SPEC = rlt::rl::environments::pendulum::Specification<T, TI, rlt::rl::environments::pendulum::DefaultParameters<T>>;
 using ENVIRONMENT = rlt::rl::environments::Pendulum<PENDULUM_SPEC>;
-struct LOOP_CORE_PARAMETERS: rlt::rl::algorithms::sac::loop::core::DefaultParameters<T, TI, ENVIRONMENT>{
-    struct SAC_PARAMETERS: rlt::rl::algorithms::sac::DefaultParameters<T, TI, ENVIRONMENT::ACTION_DIM>{
+struct LOOP_CORE_PARAMETERS: rlt::rl::algorithms::sac::loop::core::DefaultParameters<TYPE_POLICY, TI, ENVIRONMENT>{
+    struct SAC_PARAMETERS: rlt::rl::algorithms::sac::DefaultParameters<TYPE_POLICY, TI, ENVIRONMENT::ACTION_DIM>{
         static constexpr TI ACTOR_BATCH_SIZE = 100;
         static constexpr TI CRITIC_BATCH_SIZE = 100;
     };
@@ -66,7 +67,7 @@ struct LOOP_CORE_PARAMETERS: rlt::rl::algorithms::sac::loop::core::DefaultParame
     static constexpr TI CRITIC_NUM_LAYERS = 3;
     static constexpr TI CRITIC_HIDDEN_DIM = 64;
 };
-template<typename T, typename TI, typename ENVIRONMENT, typename PARAMETERS>
+template<typename T, typename TI, typename ENVIRONMENT, typename PARAMETERS, bool DYNAMIC_ALLOCATION>
 struct APPROXIMATOR_CONFIG{
     template <typename CAPABILITY>
     struct Actor{
@@ -99,14 +100,14 @@ struct APPROXIMATOR_CONFIG{
     using ACTOR_TYPE = typename Actor<CAPABILITY_ACTOR>::MODEL;
     using CRITIC_TYPE = typename Critic<CAPABILITY_CRITIC>::MODEL;
     using CRITIC_TARGET_TYPE = typename Critic<rlt::nn::capability::Forward<DYNAMIC_ALLOCATION_CRITIC>>::MODEL;
-    using ACTOR_OPTIMIZER = rlt::nn::optimizers::Adam<rlt::nn::optimizers::adam::Specification<T, TI, typename PARAMETERS::ACTOR_OPTIMIZER_PARAMETERS>>;
-    using CRITIC_OPTIMIZER = rlt::nn::optimizers::Adam<rlt::nn::optimizers::adam::Specification<T, TI, typename PARAMETERS::CRITIC_OPTIMIZER_PARAMETERS>>;
-    using ALPHA_OPTIMIZER = rlt::nn::optimizers::Adam<rlt::nn::optimizers::adam::Specification<T, TI, typename PARAMETERS::ALPHA_OPTIMIZER_PARAMETERS>>;
+    using ACTOR_OPTIMIZER = rlt::nn::optimizers::Adam<rlt::nn::optimizers::adam::Specification<T, TI, typename PARAMETERS::ACTOR_OPTIMIZER_PARAMETERS, DYNAMIC_ALLOCATION_LOOP_STATE>>;
+    using CRITIC_OPTIMIZER = rlt::nn::optimizers::Adam<rlt::nn::optimizers::adam::Specification<T, TI, typename PARAMETERS::CRITIC_OPTIMIZER_PARAMETERS, DYNAMIC_ALLOCATION_LOOP_STATE>>;
+    using ALPHA_OPTIMIZER = rlt::nn::optimizers::Adam<rlt::nn::optimizers::adam::Specification<T, TI, typename PARAMETERS::ALPHA_OPTIMIZER_PARAMETERS, DYNAMIC_ALLOCATION_LOOP_STATE>>;
 
 };
 
-using RNG = decltype(rlt::random::default_engine(typename DEVICE::SPEC::RANDOM{}));
-using LOOP_CORE_CONFIG = rlt::rl::algorithms::sac::loop::core::Config<T, TI, RNG, ENVIRONMENT, LOOP_CORE_PARAMETERS, APPROXIMATOR_CONFIG, DYNAMIC_ALLOCATION_LOOP_STATE>;
+using RNG = DEVICE::SPEC::RANDOM::ENGINE<>;
+using LOOP_CORE_CONFIG = rlt::rl::algorithms::sac::loop::core::Config<TYPE_POLICY, TI, RNG, ENVIRONMENT, LOOP_CORE_PARAMETERS, APPROXIMATOR_CONFIG, DYNAMIC_ALLOCATION_LOOP_STATE>;
 #ifdef BENCHMARK
 #ifndef RL_TOOLS_DEPLOYMENT_ARDUINO
 using LOOP_TIMING_CONFIG = rlt::rl::loop::steps::timing::Config<LOOP_CORE_CONFIG>;
@@ -116,7 +117,7 @@ using LOOP_CONFIG = LOOP_CORE_CONFIG;
 #endif
 #else
 template <typename NEXT>
-struct EVAL_PARAMETERS: rlt::rl::loop::steps::evaluation::Parameters<T, TI, NEXT>{
+struct EVAL_PARAMETERS: rlt::rl::loop::steps::evaluation::Parameters<TYPE_POLICY, TI, NEXT>{
     static constexpr TI EVALUATION_INTERVAL = 1000;
     static constexpr TI N_EVALUATIONS = NEXT::CORE_PARAMETERS::STEP_LIMIT / EVALUATION_INTERVAL;
 };
@@ -137,10 +138,10 @@ template <typename DEVICE, typename LOOP_STATE>
 void print_sizes(DEVICE& device, LOOP_STATE& ts){
     rlt::log(device, device.logger, "ActorCritic size: ", sizeof(ts.actor_critic));
     rlt::log(device, device.logger, "ActorCritic.actor size: ", sizeof(ts.actor_critic.actor));
-    rlt::log(device, device.logger, "ActorCritic.critic_1 size: ", sizeof(ts.actor_critic.critic_1));
-    rlt::log(device, device.logger, "ActorCritic.critic_2 size: ", sizeof(ts.actor_critic.critic_2));
-    rlt::log(device, device.logger, "ActorCritic.critic_target_1 size: ", sizeof(ts.actor_critic.critic_target_1));
-    rlt::log(device, device.logger, "ActorCritic.critic_target_2 size: ", sizeof(ts.actor_critic.critic_target_2));
+    rlt::log(device, device.logger, "ActorCritic.critics[0] size: ", sizeof(ts.actor_critic.critics[0]));
+    rlt::log(device, device.logger, "ActorCritic.critics[1] size: ", sizeof(ts.actor_critic.critics[1]));
+    rlt::log(device, device.logger, "ActorCritic.critics_target[0] size: ", sizeof(ts.actor_critic.critics_target[0]));
+    rlt::log(device, device.logger, "ActorCritic.critics_target[1] size: ", sizeof(ts.actor_critic.critics_target[1]));
     rlt::log(device, device.logger, "OffPolicyRunner size: ", sizeof(ts.off_policy_runner));
     rlt::log(device, device.logger, "OffPolicyRunner.replay_buffers size: ", sizeof(ts.off_policy_runner.replay_buffers));
     rlt::log(device, device.logger, "CriticBatch size: ", sizeof(ts.critic_batch));

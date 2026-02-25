@@ -5,6 +5,10 @@
 
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools{
+    template <typename DEVICE>
+    void init(DEVICE& device, devices::logging::Dummy& logger){ }
+    template <typename DEVICE, typename PARAM>
+    void init(DEVICE& device, devices::logging::Dummy& logger, PARAM& param){ }
     template <typename DEVICE, typename A>
     void log(DEVICE& device, devices::logging::Dummy& logger, const A a){
     }
@@ -30,6 +34,12 @@ namespace rl_tools{
     void add_histogram(DEVICE& device, devices::logging::Dummy& logger, const TOPIC, const ARG*, const ARG_LEN, const CADENCE){ /* noop */ }
     template <typename DEVICE, typename TOPIC, typename ARG, typename ARG_LEN>
     void add_histogram(DEVICE& device, devices::logging::Dummy& logger, const TOPIC, const ARG*, const ARG_LEN){ /* noop */ }
+    template <typename DEVICE, typename TOPIC, typename TEXT>
+    void add_text(DEVICE& device, devices::logging::Dummy& logger, const TOPIC, const TEXT){ /* noop */ }
+    template <typename DEVICE, typename TOPIC, typename TEXT, typename CADENCE>
+    void add_text(DEVICE& device, devices::logging::Dummy& logger, const TOPIC, const TEXT, const CADENCE){ /* noop */ }
+    template <typename DEVICE, typename HPARAMS, typename METRICS>
+    void add_hparams(DEVICE& device, devices::logging::Dummy& logger, const HPARAMS&, const METRICS&){ /* noop */ }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END
 #endif

@@ -11,19 +11,22 @@ using DEVICE_GENERIC = rlt::devices::DefaultCPU;
 #include <cstring>
 
 
-template <typename T, typename TI, TI INPUT_DIM, TI OUTPUT_DIM, TI BATCH_SIZE>
+template <typename TYPE_POLICY, typename TI, TI INPUT_DIM, TI OUTPUT_DIM, TI BATCH_SIZE>
 void test(){
+    using T = typename TYPE_POLICY::DEFAULT;
     DEVICE_MKL device_mkl;
     DEVICE_GENERIC device_generic;
     TI seed = 1;
-    auto rng = rlt::random::default_engine(DEVICE_MKL::SPEC::RANDOM(), seed);
+    DEVICE_MKL::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device_mkl, rng);
+    rlt::init(device_mkl, rng, seed);
 
 //    constexpr TI INPUT_DIM = 5;
 //    constexpr TI OUTPUT_DIM = 5;
     constexpr auto ACTIVATION_FUNCTION = rlt::nn::activation_functions::RELU;
 
     using INPUT_SHAPE = rlt::tensor::Shape<TI, 1, BATCH_SIZE, INPUT_DIM>;
-    using LAYER_CONFIG = rlt::nn::layers::dense::Configuration<T, TI, OUTPUT_DIM, ACTIVATION_FUNCTION>;
+    using LAYER_CONFIG = rlt::nn::layers::dense::Configuration<TYPE_POLICY, TI, OUTPUT_DIM, ACTIVATION_FUNCTION>;
 
     rlt::nn::layers::dense::Layer<LAYER_CONFIG, rlt::nn::capability::Forward<>, INPUT_SHAPE> layer;
     typename decltype(layer)::template Buffer<> layer_buffer;
@@ -52,10 +55,10 @@ void test(){
 
 TEST(RL_TOOLS_NN_LAYERS_DENSE, COPY_REGRESSION_MKL) {
     using TI = typename DEVICE_MKL::index_t;
-    test<float, TI, 5, 5, 1>();
-    test<float, TI, 5, 5, 2>();
-    test<float, TI, 2, 5, 10>();
-    test<float, TI, 3, 5, 100>();
-    test<float, TI, 15, 16, 80>();
-    test<float, TI, 15, 16, 81>();
+    test<rlt::numeric_types::Policy<float>, TI, 5, 5, 1>();
+    test<rlt::numeric_types::Policy<float>, TI, 5, 5, 2>();
+    test<rlt::numeric_types::Policy<float>, TI, 2, 5, 10>();
+    test<rlt::numeric_types::Policy<float>, TI, 3, 5, 100>();
+    test<rlt::numeric_types::Policy<float>, TI, 15, 16, 80>();
+    test<rlt::numeric_types::Policy<float>, TI, 15, 16, 81>();
 }

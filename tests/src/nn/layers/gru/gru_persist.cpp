@@ -7,7 +7,7 @@
 #include <rl_tools/nn_models/sequential/operations_generic.h>
 #include <rl_tools/nn/optimizers/adam/operations_generic.h>
 
-#include <rl_tools/containers/tensor/persist.h>
+#include <rl_tools/persist/backends/hdf5/operations_cpu.h>
 #include <rl_tools/nn/optimizers/adam/instance/persist.h>
 #include <rl_tools/nn/layers/embedding/persist.h>
 #include <rl_tools/nn/layers/gru/persist.h>
@@ -27,9 +27,10 @@ namespace rlt = rl_tools;
 using DEVICE = rlt::devices::DefaultCPU;
 using TI = typename DEVICE::index_t;
 using T = double;
+using TYPE_POLICY = rlt::numeric_types::Policy<T>;
 
 TEST(RL_TOOLS_NN_LAYERS_GRU, PERSIST){
-    using CONFIG = Config<T, TI>;
+    using CONFIG = Config<TYPE_POLICY, TI>;
     using GRU = typename CONFIG::GRU::Layer<typename CONFIG::CAPABILITY, typename CONFIG::INPUT_SHAPE>;
     GRU gru;
     typename GRU::Buffer<true> buffer;
@@ -39,8 +40,11 @@ TEST(RL_TOOLS_NN_LAYERS_GRU, PERSIST){
     rlt::Tensor<rlt::tensor::Specification<T, TI, GRU::OUTPUT_SHAPE>> d_output;
 
     DEVICE device;
-    auto rng = rlt::random::default_engine(device.random, 0);
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, 0);
 
+    rlt::malloc(device, optimizer);
     rlt::malloc(device, gru);
     rlt::malloc(device, buffer);
     rlt::malloc(device, input);
@@ -62,13 +66,15 @@ TEST(RL_TOOLS_NN_LAYERS_GRU, PERSIST){
         auto file = HighFive::File(FILE_PATH.string(), HighFive::File::Overwrite);
         rlt::zero_gradient(device, gru);
         rlt::reset_forward_state(device, gru);
-        rlt::save(device, gru, file.createGroup("test_gru"));
+        auto test_gru_group = rlt::create_group(device, file, "test_gru");
+        rlt::save(device, gru, test_gru_group);
     }
     {
         auto file = HighFive::File(FILE_PATH.string(), HighFive::File::ReadOnly);
         GRU gru_copy;
         rlt::malloc(device, gru_copy);
-        rlt::load(device, gru_copy, file.getGroup("test_gru"));
+        auto group = rlt::get_group(device, file, "test_gru");
+        rlt::load(device, gru_copy, group);
         T abs_diff = rlt::abs_diff(device, gru, gru_copy);
         std::cout << "GRU abs_diff: " << abs_diff << std::endl;
         rlt::utils::assert_exit(device, abs_diff < 1e-15, "Checkpoint failed");

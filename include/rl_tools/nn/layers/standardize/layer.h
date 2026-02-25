@@ -17,8 +17,8 @@ namespace rl_tools::nn::layers::standardize {
         static_assert(LAYER_SPEC::INPUT_DIM == LAYER_SPEC::OUTPUT_DIM);
         static_assert(INPUT_SPEC::ROWS == OUTPUT_SPEC::ROWS);
         //                INPUT_SPEC::ROWS <= OUTPUT_SPEC::ROWS && // todo: could be relaxed to not fill the full output
-        static_assert(utils::typing::is_same_v<typename LAYER_SPEC::T, typename INPUT_SPEC::T>);
-        static_assert(utils::typing::is_same_v<typename INPUT_SPEC::T, typename OUTPUT_SPEC::T>);
+        // static_assert(utils::typing::is_same_v<typename LAYER_SPEC::T, typename INPUT_SPEC::T>);
+        // static_assert(utils::typing::is_same_v<typename INPUT_SPEC::T, typename OUTPUT_SPEC::T>);
         return true;
     }
     template <typename LAYER_SPEC, typename INPUT_SPEC, typename OUTPUT_SPEC>
@@ -34,9 +34,9 @@ namespace rl_tools::nn::layers::standardize {
 
     template <typename LAYER_SPEC_1, typename LAYER_SPEC_2>
     constexpr bool check_compatibility = check_compatibility_f<LAYER_SPEC_1, LAYER_SPEC_2>();
-    template<typename T_T, typename T_TI>
+    template<typename T_TYPE_POLICY, typename T_TI>
     struct Configuration {
-        using T = T_T;
+        using TYPE_POLICY = T_TYPE_POLICY;
         using TI = T_TI;
         // Summary
         static constexpr auto NUM_WEIGHTS = 0; //zero trainable parameters (the point is to not learn the mean and std by gradient descent, otherwise it would just be a normal layer)
@@ -44,7 +44,7 @@ namespace rl_tools::nn::layers::standardize {
     template <typename T_CONFIG, typename T_CAPABILITY, typename T_INPUT_SHAPE>
     struct Specification: T_CAPABILITY, T_CONFIG{
         using CONFIG = T_CONFIG;
-        using T = typename CONFIG::T;
+        using TYPE_POLICY = typename CONFIG::TYPE_POLICY;
         using TI = typename CONFIG::TI;
         using CAPABILITY = T_CAPABILITY;
         using INPUT_SHAPE = T_INPUT_SHAPE;
@@ -61,7 +61,7 @@ namespace rl_tools::nn::layers::standardize {
     template<typename T_SPEC>
     struct LayerForward {
         using SPEC = T_SPEC;
-        using T = typename SPEC::T;
+        using TYPE_POLICY = typename SPEC::TYPE_POLICY;
         using TI = typename SPEC::TI;
         static constexpr TI INPUT_DIM = SPEC::INPUT_DIM;
         static constexpr TI OUTPUT_DIM = SPEC::OUTPUT_DIM;
@@ -70,10 +70,9 @@ namespace rl_tools::nn::layers::standardize {
         using OUTPUT_SHAPE = typename SPEC::OUTPUT_SHAPE;
         template <typename NEW_INPUT_SHAPE>
         using OUTPUT_SHAPE_FACTORY = typename SPEC::template OUTPUT_SHAPE_FACTORY<NEW_INPUT_SHAPE>;
-        using STATISTICS_CONTAINER_SPEC = matrix::Specification<T, TI, 1, INPUT_DIM, SPEC::DYNAMIC_ALLOCATION>;
-        using STATISTICS_CONTAINER_TYPE = Matrix<STATISTICS_CONTAINER_SPEC>;
-        using STATISTICS_PARAMETER_SPEC = nn::parameters::Plain::spec<STATISTICS_CONTAINER_TYPE, nn::parameters::groups::Normal, nn::parameters::categories::Constant>; // Constant from the view of a forward or backward pass
-        typename nn::parameters::Plain::template instance<STATISTICS_PARAMETER_SPEC> mean, precision; // precision = 1/std
+        using STATISTICS_SHAPE = tensor::Shape<TI, INPUT_DIM>;
+        using STATISTICS_PARAMETER_SPEC = nn::parameters::Plain::Specification<typename SPEC::TYPE_POLICY, TI, STATISTICS_SHAPE, nn::parameters::groups::Normal, nn::parameters::categories::Constant, SPEC::DYNAMIC_ALLOCATION, SPEC::CONST>; // Constant from the view of a forward or backward pass
+        typename nn::parameters::Plain::template Instance<STATISTICS_PARAMETER_SPEC> mean, precision; // precision = 1/std
 
         template<bool DYNAMIC_ALLOCATION=true>
         using State = standardize::State;
@@ -86,7 +85,7 @@ namespace rl_tools::nn::layers::standardize {
     template<typename SPEC>
     struct LayerGradient: public LayerBackward<SPEC> {
         // This layer supports backpropagation wrt its input but including its weights (for this it stores the intermediate outputs in addition to the pre_activations because they determine the gradient wrt the weights of the following layer)
-        using OUTPUT_CONTAINER_SPEC = matrix::Specification<typename SPEC::T, typename SPEC::TI, SPEC::INTERNAL_BATCH_SIZE, SPEC::OUTPUT_DIM, SPEC::DYNAMIC_ALLOCATION>;
+        using OUTPUT_CONTAINER_SPEC = matrix::Specification<typename SPEC::TYPE_POLICY::template GET<numeric_types::categories::Accumulator>, typename SPEC::TI, SPEC::INTERNAL_BATCH_SIZE, SPEC::OUTPUT_DIM, SPEC::DYNAMIC_ALLOCATION, matrix::layouts::DEFAULT<typename SPEC::TI>, SPEC::CONST>;
         using OUTPUT_CONTAINER_TYPE = Matrix<OUTPUT_CONTAINER_SPEC>;
         OUTPUT_CONTAINER_TYPE output;
     };

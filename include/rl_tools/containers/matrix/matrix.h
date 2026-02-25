@@ -57,14 +57,17 @@ namespace rl_tools{
     namespace matrix{
         template <typename T, typename TI, TI SIZE>
         struct MatrixStatic{
+            static constexpr bool DYNAMIC_ALLOCATION = false;
             T _data[SIZE];
         };
         template <typename T, typename TI, TI SIZE_BYTES, bool CONST = false>
         struct MatrixDynamic{
+            static constexpr bool DYNAMIC_ALLOCATION = true;
             T* RL_TOOLS_RESTRICT _data = nullptr;
         };
         template <typename T, typename TI, TI SIZE_BYTES>
         struct MatrixDynamic<T, TI, SIZE_BYTES, true>{
+            static constexpr bool DYNAMIC_ALLOCATION = true;
             const T* RL_TOOLS_RESTRICT _data = nullptr;
         };
     }
@@ -86,7 +89,7 @@ namespace rl_tools{
 //        virtual void _abstract_tag(){};
 //        // pure virtual function to make this class abstract (should be instantiated by either the MatrixStatic or MatrixDynamic subclasses class)
 //        virtual void _abstract_tag() = 0;
-        Matrix() = default;
+        // Matrix() = default;
 //        T* _data = nullptr;
 //        Matrix() = default;
 //        Matrix(T* data): _data(data){};

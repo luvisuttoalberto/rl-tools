@@ -7,6 +7,7 @@
 #include <rl_tools/nn_models/sequential/operations_generic.h>
 #include <rl_tools/nn/optimizers/adam/operations_generic.h>
 
+#include <rl_tools/numeric_types/persist_code.h>
 #include <rl_tools/containers/tensor/persist_code.h>
 #include <rl_tools/nn/parameters/persist_code.h>
 #include <rl_tools/nn/optimizers/adam/instance/persist_code.h>
@@ -37,6 +38,7 @@ std::optional<std::string> get_env_var(const std::string& var) {
 using DEVICE = rlt::devices::DefaultCPU;
 using TI = typename DEVICE::index_t;
 using T = double;
+using TYPE_POLICY = rlt::numeric_types::Policy<T>;
 
 template <typename T_CONTENT, typename T_NEXT_MODULE = rlt::nn_models::sequential::OutputModule>
 using Module = typename rlt::nn_models::sequential::Module<T_CONTENT, T_NEXT_MODULE>;
@@ -46,7 +48,7 @@ TEST(RL_TOOLS_NN_LAYERS_GRU, PERSIST_CODE){
     static constexpr TI INPUT_DIM = 4;
     static constexpr TI OUTPUT_DIM = 5;
     using INPUT_SHAPE = rlt::tensor::Shape<TI, SEQUENCE_LENGTH, BATCH_SIZE, INPUT_DIM>;
-    using GRU_CONFIG = rlt::nn::layers::gru::Configuration<T, TI, OUTPUT_DIM, rlt::nn::parameters::groups::Normal, true>;
+    using GRU_CONFIG = rlt::nn::layers::gru::Configuration<TYPE_POLICY, TI, OUTPUT_DIM, rlt::nn::parameters::groups::Normal, true>;
     using GRU = rlt::nn::layers::gru::BindConfiguration<GRU_CONFIG>;
     using CAPABILITY = rlt::nn::capability::Gradient<rlt::nn::parameters::Adam>;
 
@@ -55,7 +57,7 @@ TEST(RL_TOOLS_NN_LAYERS_GRU, PERSIST_CODE){
 
     GRU_MODEL gru;
     typename GRU_MODEL::Buffer<true> buffer;
-    using ADAM_SPEC = rlt::nn::optimizers::adam::Specification<T, TI>;
+    using ADAM_SPEC = rlt::nn::optimizers::adam::Specification<TYPE_POLICY, TI>;
     using ADAM = rlt::nn::optimizers::Adam<ADAM_SPEC>;
     ADAM optimizer;
 
@@ -63,14 +65,18 @@ TEST(RL_TOOLS_NN_LAYERS_GRU, PERSIST_CODE){
     rlt::Tensor<rlt::tensor::Specification<T, TI, rlt::tensor::Replace<GRU_MODEL::OUTPUT_SHAPE, BATCH_SIZE, 1>>> output, d_output;
 
     DEVICE device;
-    auto rng = rlt::random::default_engine(device.random, 0);
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, 0);
 
+    rlt::malloc(device, optimizer);
     rlt::malloc(device, gru);
     rlt::malloc(device, buffer);
     rlt::malloc(device, input);
     rlt::malloc(device, output);
     rlt::malloc(device, d_output);
     rlt::init_weights(device, gru, rng);
+    rlt::init(device, optimizer);
     rlt::reset_optimizer_state(device, optimizer, gru);
     rlt::randn(device, input, rng);
     rlt::randn(device, d_output, rng);

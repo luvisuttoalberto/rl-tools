@@ -30,8 +30,8 @@ namespace rl_tools::rl::algorithms::td3::loop::core{
             using MODULE_GRU_TWO_LAYER = Module<GRU, Module<GRU2, Module<OUTPUT>>>;
             using MODULE_GRU_THREE_LAYER = Module<GRU, Module<GRU2, Module<DENSE_LAYER, Module<OUTPUT>>>>;
 
-            using SELECTED_MODULE = rl_tools::utils::typing::conditional_t<PARAMETERS::CRITIC_NUM_LAYERS == 2, MODULE_GRU, rl_tools::utils::typing::conditional_t<PARAMETERS::CRITIC_NUM_LAYERS == 3, MODULE_GRU_TWO_LAYER, MODULE_GRU_THREE_LAYER>>;
-            static_assert(PARAMETERS::CRITIC_NUM_LAYERS == 2 || PARAMETERS::CRITIC_NUM_LAYERS == 3 || PARAMETERS::CRITIC_NUM_LAYERS == 4, "Only 2/3/4 layers (1/2 GRU + 1/2 Output) are supported right now");
+            using SELECTED_MODULE = rl_tools::utils::typing::conditional_t<PARAMETERS::CRITIC_NUM_LAYERS == 3, MODULE_GRU, rl_tools::utils::typing::conditional_t<PARAMETERS::CRITIC_NUM_LAYERS == 4, MODULE_GRU_TWO_LAYER, MODULE_GRU_THREE_LAYER>>;
+            static_assert(PARAMETERS::CRITIC_NUM_LAYERS == 3 || PARAMETERS::CRITIC_NUM_LAYERS == 4 || PARAMETERS::CRITIC_NUM_LAYERS == 5, "Only 3/4/5 layers (1 input + 1/2 GRU + 1/2 Output) are supported right now");
             using MODEL = nn_models::sequential::Build<CAPABILITY, SELECTED_MODULE, INPUT_SHAPE>;
         };
         template <typename CAPABILITY>
@@ -56,8 +56,8 @@ namespace rl_tools::rl::algorithms::td3::loop::core{
             using MODULE_GRU_TWO_LAYER = Module<GRU, Module<GRU2, Module<OUTPUT>>>;
             using MODULE_GRU_THREE_LAYER = Module<GRU, Module<GRU2, Module<DENSE_LAYER, Module<OUTPUT>>>>;
 
-            using SELECTED_MODULE = rl_tools::utils::typing::conditional_t<PARAMETERS::CRITIC_NUM_LAYERS == 2, MODULE_GRU, rl_tools::utils::typing::conditional_t<PARAMETERS::CRITIC_NUM_LAYERS == 3, MODULE_GRU_TWO_LAYER, MODULE_GRU_THREE_LAYER>>;
-            static_assert(PARAMETERS::CRITIC_NUM_LAYERS == 2 || PARAMETERS::CRITIC_NUM_LAYERS == 3 || PARAMETERS::CRITIC_NUM_LAYERS == 4, "Only 2/3/4 layers (1/2 GRU + 1/2 Output) are supported right now");
+            using SELECTED_MODULE = rl_tools::utils::typing::conditional_t<PARAMETERS::CRITIC_NUM_LAYERS == 3, MODULE_GRU, rl_tools::utils::typing::conditional_t<PARAMETERS::CRITIC_NUM_LAYERS == 4, MODULE_GRU_TWO_LAYER, MODULE_GRU_THREE_LAYER>>;
+            static_assert(PARAMETERS::CRITIC_NUM_LAYERS == 3 || PARAMETERS::CRITIC_NUM_LAYERS == 4 || PARAMETERS::CRITIC_NUM_LAYERS == 5, "Only 3/4/5 layers (1 input + 1/2 GRU + 1/2 Output) are supported right now");
             using MODEL = nn_models::sequential::Build<CAPABILITY, SELECTED_MODULE, INPUT_SHAPE>;
         };
 
@@ -67,7 +67,7 @@ namespace rl_tools::rl::algorithms::td3::loop::core{
         using CRITIC_TYPE = typename Critic<CAPABILITY_CRITIC>::MODEL;
         using CRITIC_TARGET_TYPE = typename Critic<nn::capability::Forward<>>::MODEL;
         using ACTOR_TARGET_TYPE = typename Actor<nn::capability::Forward<>>::MODEL;
-        using OPTIMIZER_SPEC = nn::optimizers::adam::Specification<T, TI, typename PARAMETERS::OPTIMIZER_PARAMETERS>;
+        using OPTIMIZER_SPEC = nn::optimizers::adam::Specification<T, TI, typename PARAMETERS::OPTIMIZER_PARAMETERS, DYNAMIC_ALLOCATION>;
         using OPTIMIZER = nn::optimizers::Adam<OPTIMIZER_SPEC>;
 
     };

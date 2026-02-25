@@ -11,8 +11,8 @@
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools{
     template<typename DEVICE, typename SPEC, template <typename> typename BASE>
-    persist::Code save_code_split(DEVICE& device, nn_models::mlp_unconditional_stddev::NeuralNetworkForward<SPEC, BASE>& network, std::string name, bool const_declaration=false, typename DEVICE::index_t indent = 0){
-        using T = typename SPEC::T;
+    persist::Code save_code_split(DEVICE& device, nn_models::mlp_unconditional_stddev::NeuralNetworkForward<SPEC, BASE>& network, std::string name, bool const_declaration=true, typename DEVICE::index_t indent = 0){
+        // using T = typename SPEC::T;
         using TI = typename DEVICE::index_t;
         std::stringstream indent_ss;
         for(TI i=0; i < indent; i++){
@@ -20,11 +20,11 @@ namespace rl_tools{
         }
         std::string ind = indent_ss.str();
         std::stringstream ss_header;
-        ss_header << "#include <rl_tools/nn_models/mlp_unconditional_stddev/network.h>\n";
         std::stringstream ss;
         ss << ind << "namespace " << name << " {\n";
         auto input_layer = save_code_split(device, network.input_layer, "input_layer", const_declaration, indent+1);
         ss_header << input_layer.header;
+        ss_header << "#include <rl_tools/nn_models/mlp_unconditional_stddev/network.h>\n";
         ss << input_layer.body;
         for(TI hidden_layer_i = 0; hidden_layer_i < SPEC::NUM_HIDDEN_LAYERS; hidden_layer_i++){
             auto hidden_layer = save_code_split(device, network.hidden_layers[hidden_layer_i], "hidden_layer_" + std::to_string(hidden_layer_i), const_declaration, indent+1);
@@ -37,19 +37,20 @@ namespace rl_tools{
         auto log_std = save_code_split(device, network.log_std, "log_std", const_declaration, indent+1);
         ss_header << log_std.header;
         ss << log_std.body;
-        std::string T_string = containers::persist::get_type_string<T>();
+        // std::string T_string = containers::persist::get_type_string<T>();
         std::string TI_string = containers::persist::get_type_string<TI>();
+        ss << ind << "    using TYPE_POLICY = " + to_string(typename SPEC::TYPE_POLICY{}) + ";" << "\n";
         ss << ind << "    using CONFIG = RL_TOOLS""_NAMESPACE_WRAPPER ::rl_tools::nn_models::mlp::Configuration<";
-        ss << T_string << ", ";
+        ss << "TYPE_POLICY, ";
         ss << TI_string << ", ";
         ss << SPEC::OUTPUT_DIM << ", " << SPEC::NUM_LAYERS << ", " << SPEC::HIDDEN_DIM << ", ";
         ss << nn::layers::dense::persist::get_activation_function_string<SPEC::HIDDEN_ACTIVATION_FUNCTION>() << ", ";
         ss << nn::layers::dense::persist::get_activation_function_string<SPEC::OUTPUT_ACTIVATION_FUNCTION>() << ", ";
-        ss << "RL_TOOLS""_NAMESPACE_WRAPPER ::rl_tools::nn::layers::dense::DefaultInitializer<" << T_string << ", " << TI_string << ">";
+        ss << "RL_TOOLS""_NAMESPACE_WRAPPER ::rl_tools::nn::layers::dense::DefaultInitializer<" << "TYPE_POLICY, " << TI_string << ">";
         ss << ">; \n";
         ss << ind << "    " << "using TEMPLATE = RL_TOOLS""_NAMESPACE_WRAPPER ::rl_tools::nn_models::mlp_unconditional_stddev::BindConfiguration<CONFIG>;" << "\n";
         ss << ind << "    " << "using INPUT_SHAPE = RL_TOOLS""_NAMESPACE_WRAPPER ::rl_tools::tensor::Shape<" << TI_string << ", " << get<0>(typename SPEC::INPUT_SHAPE{}) << ", " << get<1>(typename SPEC::INPUT_SHAPE{}) << ", " << get<2>(typename SPEC::INPUT_SHAPE{}) << ">;\n";
-        ss << ind << "    " << "using CAPABILITY = " << to_string(typename SPEC::CAPABILITY{}) << ";" << "\n";
+        ss << ind << "    " << "using CAPABILITY = " << to_string(typename SPEC::CAPABILITY::template CHANGE_PARAMETERS<true, true>{}) << ";" << "\n";
         ss << ind << "    " << "using TYPE = RL_TOOLS""_NAMESPACE_WRAPPER ::rl_tools::nn_models::mlp_unconditional_stddev::NeuralNetwork<CONFIG, CAPABILITY, INPUT_SHAPE>;" << "\n";
         std::stringstream ss_initializer_list;
         {
@@ -107,20 +108,20 @@ namespace rl_tools{
                 }
             }
         }
-        ss << ind << "    " << (const_declaration ? "const " : "") << "TYPE module = " << initializer_list << ";\n";
+        ss << ind << "    " << (const_declaration ? "constexpr " : "") << "TYPE module = " << initializer_list << ";\n";
         ss << ind << "    " << "template <typename T_TYPE = TYPE>" << "\n";
-        ss << ind << "    " << (const_declaration ? "const " : "") << "T_TYPE factory = " << initializer_list_create << ";" << "\n";
+        ss << ind << "    " << (const_declaration ? "constexpr " : "") << "T_TYPE factory = " << initializer_list_create << ";" << "\n";
         ss << ind << "    " << "template <typename T_TYPE = TYPE>" << "\n";
-        ss << ind << "    " << (const_declaration ? "const " : "") << "T_TYPE factory_function(){return T_TYPE" << initializer_list_create << ";" << "}\n";
+        ss << ind << "    " << (const_declaration ? "constexpr " : "") << "T_TYPE factory_function(){return T_TYPE" << initializer_list_create << ";" << "}\n";
         ss << ind << "}\n";
         return {ss_header.str(), ss.str()};
     }
     template<typename DEVICE, typename SPEC, template <typename> typename BASE>
-    persist::Code save_code_split(DEVICE& device, nn_models::mlp_unconditional_stddev::NeuralNetworkBackward<SPEC, BASE>& network, std::string name, bool const_declaration=false, typename DEVICE::index_t indent = 0){
+    persist::Code save_code_split(DEVICE& device, nn_models::mlp_unconditional_stddev::NeuralNetworkBackward<SPEC, BASE>& network, std::string name, bool const_declaration=true, typename DEVICE::index_t indent = 0){
         return save_code_split(device, static_cast<nn_models::mlp_unconditional_stddev::NeuralNetworkForward<SPEC, BASE>&>(network), name, const_declaration, indent);
     }
     template<typename DEVICE, typename SPEC, template <typename> typename BASE>
-    persist::Code save_code_split(DEVICE& device, nn_models::mlp_unconditional_stddev::NeuralNetworkGradient<SPEC, BASE>& network, std::string name, bool const_declaration=false, typename DEVICE::index_t indent = 0){
+    persist::Code save_code_split(DEVICE& device, nn_models::mlp_unconditional_stddev::NeuralNetworkGradient<SPEC, BASE>& network, std::string name, bool const_declaration=true, typename DEVICE::index_t indent = 0){
         return save_code_split(device, static_cast<nn_models::mlp_unconditional_stddev::NeuralNetworkBackward<SPEC, BASE>&>(network), name, const_declaration, indent);
     }
     template<typename DEVICE, typename SPEC>

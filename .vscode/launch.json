@@ -108,6 +108,74 @@
             "console": "integratedTerminal",
             "justMyCode": true,
             "cwd": "${workspaceFolder}",
-        }
+        },
+        {
+            "name": "src/rl/zoo/l2f/plot_learning_curves.py",
+            "type": "python",
+            "request": "launch",
+            "program": "src/rl/zoo/l2f/plot_learning_curves.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}",
+        },
+        {
+            "name": "src/rl/zoo/nn_analytics.py",
+            "type": "python",
+            "request": "launch",
+            "program": "src/rl/zoo/nn_analytics.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}",
+        },
+        {
+            "name": "src/rl/zoo/pendulum-velocity-v1/state_estimation.py",
+            "type": "python",
+            "request": "launch",
+            "program": "src/rl/zoo/pendulum-velocity-v1/state_estimation.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "OMP_NUM_THREADS": "1"
+            }
+        },
+        {
+            "name": "src/foundation_policy/analysis/analyze.py",
+            "type": "python",
+            "request": "launch",
+            "program": "src/foundation_policy/analysis/analyze.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "src/ui_server/render/puppeteer.js",
+            "program": "${workspaceFolder}/src/ui_server/render/puppeteer.js",
+            "request": "launch",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "type": "node"
+        },
+        {
+            "name": "embedded_platforms/betaflight/minimal-l2f.py [macos-mapping]",
+            "type": "python",
+            "request": "launch",
+            "program": "embedded_platforms/betaflight/minimal-l2f.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}",
+            "args": ["embedded_platforms/betaflight/gamepad_mapping_macos.json"]
+        },
+        {
+            "name": "embedded_platforms/betaflight/minimal-l2f.py [ubuntu-mapping]",
+            "type": "python",
+            "request": "launch",
+            "program": "embedded_platforms/betaflight/minimal-l2f.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}",
+            "args": ["embedded_platforms/betaflight/gamepad_mapping_ubuntu.json"]
+        },
     ]
 }

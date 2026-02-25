@@ -24,15 +24,13 @@ if(RL_TOOLS_TESTS_CODE_COVERAGE)
     add_compile_definitions(-DRL_TOOLS_TESTS_CODE_COVERAGE)
 endif()
 
-set(INSTALL_GTEST OFF CACHE BOOL "")
-set(BUILD_GMOCK OFF CACHE BOOL "")
-add_subdirectory(lib/googletest EXCLUDE_FROM_ALL)
 include(GoogleTest)
 
-set(RL_TOOLS_TESTS_DATA_PATH ${CMAKE_CURRENT_SOURCE_DIR}/data)
 add_library(rl_tools_test INTERFACE)
 target_link_libraries(rl_tools_test INTERFACE GTest::gtest_main)
-target_compile_definitions(rl_tools_test INTERFACE RL_TOOLS_TESTS_DATA_PATH=${RL_TOOLS_TESTS_DATA_PATH})
+if(RL_TOOLS_TEST_DATA_PATH)
+    target_compile_definitions(rl_tools_test INTERFACE RL_TOOLS_TEST_DATA_PATH=${RL_TOOLS_TEST_DATA_PATH})
+endif()
 add_library(RLtools::Test ALIAS rl_tools_test)
 
 
@@ -43,7 +41,7 @@ if(RL_TOOLS_TESTS_ENABLE_EIGEN)
 find_package(Eigen3 REQUIRED)
 endif()
 if(RL_TOOLS_RL_ENVIRONMENTS_MUJOCO_ENABLE_UI)
-find_package(Boost REQUIRED)
+#find_package(Boost REQUIRED)
 endif()
 
 add_subdirectory(src)

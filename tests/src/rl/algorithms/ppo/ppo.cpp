@@ -17,6 +17,7 @@ using DEV_SPEC = rlt::devices::cpu::Specification<rlt::devices::math::CPU, rlt::
 
 using DEVICE = rlt::devices::DEVICE_FACTORY<DEV_SPEC>;
 using T = float;
+using TYPE_POLICY = rlt::numeric_types::Policy<T>;
 using TI = typename DEVICE::index_t;
 
 
@@ -24,7 +25,7 @@ using TI = typename DEVICE::index_t;
 
 TEST(RL_TOOLS_RL_ALGORITHMS_PPO, TEST){
     using penv = parameters::environment<T, TI>;
-    using prl = parameters::rl<T, TI, penv::ENVIRONMENT>;
+    using prl = parameters::rl<TYPE_POLICY, TI, penv::ENVIRONMENT>;
 
     DEVICE::SPEC::LOGGING logger;
     DEVICE device;
@@ -32,7 +33,10 @@ TEST(RL_TOOLS_RL_ALGORITHMS_PPO, TEST){
     {
         static constexpr T ALPHA = 0.001;
     };
-    auto rng = rlt::random::default_engine(DEVICE::SPEC::RANDOM(), 10);
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, 10);
+
     prl::PPO_TYPE ppo;
     prl::PPO_BUFFERS_TYPE ppo_buffers;
     prl::ON_POLICY_RUNNER_TYPE on_policy_runner;
@@ -42,6 +46,11 @@ TEST(RL_TOOLS_RL_ALGORITHMS_PPO, TEST){
     prl::CRITIC_BUFFERS critic_buffers;
     prl::CRITIC_BUFFERS_ALL critic_buffers_all;
 
+    rlt::Tensor<rlt::tensor::Specification<penv::ENVIRONMENT, TI, rlt::tensor::Shape<TI, prl::N_ENVIRONMENTS>>> envs;
+    rlt::Tensor<rlt::tensor::Specification<penv::ENVIRONMENT::Parameters, TI, rlt::tensor::Shape<TI, prl::N_ENVIRONMENTS>>> env_parameters;
+
+    rlt::malloc(device, actor_optimizer);
+    rlt::malloc(device, critic_optimizer);
     rlt::malloc(device, ppo);
     rlt::malloc(device, ppo_buffers);
     rlt::malloc(device, on_policy_runner_dataset);
@@ -50,10 +59,10 @@ TEST(RL_TOOLS_RL_ALGORITHMS_PPO, TEST){
     rlt::malloc(device, actor_buffers);
     rlt::malloc(device, critic_buffers);
     rlt::malloc(device, critic_buffers_all);
+    rlt::malloc(device, envs);
+    rlt::malloc(device, env_parameters);
 
-    penv::ENVIRONMENT envs[prl::N_ENVIRONMENTS];
-    penv::ENVIRONMENT::Parameters env_parameters[prl::N_ENVIRONMENTS];
-    rlt::init(device, on_policy_runner, envs, env_parameters, rng);
+    rlt::init(device, on_policy_runner, envs, env_parameters, ppo.actor, rng);
     rlt::init(device, ppo, actor_optimizer, critic_optimizer, rng);
     rlt::construct(device, device.logger);
     auto training_start = std::chrono::high_resolution_clock::now();
@@ -67,7 +76,7 @@ TEST(RL_TOOLS_RL_ALGORITHMS_PPO, TEST){
         }
         for (TI action_i = 0; action_i < penv::ENVIRONMENT::ACTION_DIM; action_i++) {
             auto& last_layer = rlt::get_last_layer(ppo.actor);
-            T action_log_std = rlt::get(last_layer.log_std.parameters, 0, action_i);
+            T action_log_std = rlt::get(device, last_layer.log_std.parameters, action_i);
             std::stringstream topic;
             topic << "actor/action_std/" << action_i;
             rlt::add_scalar(device, device.logger, topic.str(), rlt::math::exp(DEVICE::SPEC::MATH(), action_log_std));
@@ -114,5 +123,7 @@ TEST(RL_TOOLS_RL_ALGORITHMS_PPO, TEST){
     rlt::free(device, actor_buffers);
     rlt::free(device, critic_buffers);
     rlt::free(device, critic_buffers_all);
+    rlt::free(device, envs);
+    rlt::free(device, env_parameters);
 
 }

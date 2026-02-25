@@ -1,5 +1,6 @@
 #include <rl_tools/operations/cpu_mux.h>
 #include <rl_tools/nn/optimizers/adam/instance/operations_generic.h>
+#include <rl_tools/nn/optimizers/adam/instance/persist.h>
 #include <rl_tools/nn/operations_cpu_mux.h>
 #include <rl_tools/nn/layers/standardize/operations_generic.h>
 #include <rl_tools/nn_models/mlp_unconditional_stddev/operations_generic.h>
@@ -53,14 +54,16 @@ using LOGGER = rlt::devices::logging::CPU;
 using DEV_SPEC_SUPER = rlt::devices::cpu::Specification<rlt::devices::math::CPU, rlt::devices::random::CPU, LOGGER>;
 using TI = typename rlt::devices::DEVICE_FACTORY<DEV_SPEC_SUPER>::index_t;
 namespace execution_hints{
-    struct HINTS: rlt::rl::components::on_policy_runner::ExecutionHints<TI, 16>{};
+    struct HINTS: rlt::rl::components::on_policy_runner::ExecutionHints<TI, 1>{};
 }
 struct DEV_SPEC: DEV_SPEC_SUPER{
     using EXECUTION_HINTS = execution_hints::HINTS;
 };
 
 using DEVICE = rlt::devices::DEVICE_FACTORY<DEV_SPEC>;
+using RNG = typename DEVICE::SPEC::RANDOM::ENGINE<>;
 using T = float;
+using TYPE_POLICY = rlt::numeric_types::Policy<T>;
 using TI = typename DEVICE::index_t;
 
 
@@ -102,7 +105,7 @@ std::string sanitize_file_name(const std::string &input) {
 void run(){
     for(TI run_i = 0; run_i < NUM_RUNS; ++run_i){
         using penv = parameters::environment<double, TI>;
-        using prl = parameters::rl<T, TI, penv::ENVIRONMENT>;
+        using prl = parameters::rl<TYPE_POLICY, TI, penv::ENVIRONMENT>;
         TI seed = BASE_SEED + run_i;
         std::stringstream run_name_ss;
         run_name_ss << "ppo_ant_" + std::to_string(seed);
@@ -135,10 +138,7 @@ void run(){
         DEVICE device;
         prl::ACTOR_OPTIMIZER actor_optimizer;
         prl::CRITIC_OPTIMIZER critic_optimizer;
-        actor_optimizer.parameters.alpha = 3e-4;
-        critic_optimizer.parameters.alpha = 3e-4 * 2;
-        auto rng = rlt::random::default_engine(DEVICE::SPEC::RANDOM(), seed);
-        auto evaluation_rng = rlt::random::default_engine(DEVICE::SPEC::RANDOM(), 12);
+        RNG rng, evaluation_rng;
         prl::PPO_TYPE ppo;
         prl::PPO_BUFFERS_TYPE ppo_buffers;
         prl::ON_POLICY_RUNNER_TYPE on_policy_runner;
@@ -148,15 +148,17 @@ void run(){
         prl::ACTOR_BUFFERS actor_buffers;
         prl::CRITIC_BUFFERS critic_buffers;
         prl::CRITIC_BUFFERS_GAE critic_buffers_gae;
-        rlt::rl::components::RunningNormalizer<rlt::rl::components::running_normalizer::Specification<T, TI, penv::ENVIRONMENT::Observation::DIM>> observation_normalizer;
-        penv::ENVIRONMENT envs[prl::N_ENVIRONMENTS];
-        penv::ENVIRONMENT::Parameters env_parameters[prl::N_ENVIRONMENTS];
+        rlt::rl::components::RunningNormalizer<rlt::rl::components::running_normalizer::Specification<TYPE_POLICY, TI, penv::ENVIRONMENT::Observation::DIM>> observation_normalizer;
+        rlt::Tensor<rlt::tensor::Specification<penv::ENVIRONMENT, TI, rlt::tensor::Shape<TI, prl::N_ENVIRONMENTS>>> envs;
+        rlt::Tensor<rlt::tensor::Specification<penv::ENVIRONMENT::Parameters, TI, rlt::tensor::Shape<TI, prl::N_ENVIRONMENTS>>> env_parameters;
         penv::ENVIRONMENT evaluation_env;
         penv::ENVIRONMENT::Parameters evaluation_env_parameters;
         rlt::rl::environments::DummyUI ui;
         TI next_checkpoint_id = 0;
         TI next_evaluation_id = 0;
 
+        rlt::malloc(device, rng);
+        rlt::malloc(device, evaluation_rng);
         rlt::malloc(device, ppo);
         rlt::malloc(device, ppo_buffers);
         rlt::malloc(device, on_policy_runner_dataset);
@@ -167,8 +169,13 @@ void run(){
         rlt::malloc(device, critic_buffers);
         rlt::malloc(device, critic_buffers_gae);
         rlt::malloc(device, observation_normalizer);
+        rlt::malloc(device, actor_optimizer);
+        rlt::malloc(device, critic_optimizer);
+        rlt::malloc(device, envs);
+        rlt::malloc(device, env_parameters);
         for(TI env_i = 0; env_i < prl::N_ENVIRONMENTS; env_i++){
-            rlt::malloc(device, envs[env_i]);
+            auto& env = rlt::get_ref(device, envs, env_i);
+            rlt::malloc(device, env);
         }
         rlt::malloc(device, evaluation_env);
 
@@ -176,9 +183,13 @@ void run(){
 //        auto on_policy_runner_dataset_observations = prl::PPO_SPEC::PARAMETERS::NORMALIZE_OBSERVATIONS ? on_policy_runner_dataset.observations_normalized : on_policy_runner_dataset.observations;
 
         rlt::init(device);
-        rlt::init(device, on_policy_runner, envs, env_parameters, rng);
+        rlt::init(device, rng, seed);
+        rlt::init(device, evaluation_rng, seed);
+        rlt::init(device, on_policy_runner, envs, env_parameters, ppo.actor, rng);
         rlt::init(device, observation_normalizer);
         rlt::init(device, ppo, actor_optimizer, critic_optimizer, rng);
+        rlt::get_ref(device, actor_optimizer.parameters, 0).alpha = 3e-4;
+        rlt::get_ref(device, critic_optimizer.parameters, 0).alpha = 3e-4 * 2;
         rlt::init(device, device.logger);
         auto training_start = std::chrono::high_resolution_clock::now();
         if(prl::PPO_SPEC::PARAMETERS::NORMALIZE_OBSERVATIONS){
@@ -190,7 +201,7 @@ void run(){
             rlt::print(device, observation_normalizer.mean);
             std::cout << "Observation std: " << std::endl;
             rlt::print(device, observation_normalizer.std);
-            rlt::init(device, on_policy_runner, envs, env_parameters, rng); // reinitializing the on_policy_runner to reset the episode counters
+            rlt::init(device, on_policy_runner, envs, env_parameters, ppo.actor, rng); // reinitializing the on_policy_runner to reset the episode counters
             rlt::set_statistics(device, ppo.actor.content, observation_normalizer.mean, observation_normalizer.std);
             rlt::set_statistics(device, ppo.critic.content, observation_normalizer.mean, observation_normalizer.std);
         }
@@ -212,8 +223,10 @@ void run(){
 #if defined(RL_TOOLS_ENABLE_HDF5) && !defined(RL_TOOLS_DISABLE_HDF5)
                 try{
                     auto actor_file = HighFive::File(actor_output_path.string(), HighFive::File::Overwrite);
-                    rlt::save(device, ppo.actor, actor_file.createGroup("actor"));
-                    rlt::save(device, observation_normalizer, actor_file.createGroup("observation_normalizer"));
+                    auto actor_group = rlt::create_group(device, actor_file, "actor");
+                    auto observation_normalizer_group = rlt::create_group(device, actor_file, "observation_normalizer");
+                    rlt::save(device, ppo.actor, actor_group);
+                    rlt::save(device, observation_normalizer, observation_normalizer_group);
                 }
                 catch(HighFive::Exception& e){
                     std::cout << "Error while saving actor: " << e.what() << std::endl;
@@ -222,9 +235,9 @@ void run(){
                 next_checkpoint_id++;
             }
             if(ENABLE_EVALUATION && (on_policy_runner.step / EVALUATION_INTERVAL == next_evaluation_id)){
-                using RESULT_SPEC = rlt::rl::utils::evaluation::Specification<T, TI, decltype(evaluation_env), NUM_EVALUATION_EPISODES, prl::ON_POLICY_RUNNER_STEP_LIMIT>;
+                using RESULT_SPEC = rlt::rl::utils::evaluation::Specification<TYPE_POLICY, TI, decltype(evaluation_env), NUM_EVALUATION_EPISODES, prl::ON_POLICY_RUNNER_STEP_LIMIT>;
                 rlt::rl::utils::evaluation::Result<RESULT_SPEC> result;
-                rlt::evaluate(device, evaluation_env, evaluation_env_parameters, ui, ppo.actor, result, actor_deterministic_eval_buffers, evaluation_rng, rlt::Mode<rlt::mode::Evaluation<>>{});
+                rlt::evaluate(device, evaluation_env, ui, ppo.actor, result, evaluation_rng, rlt::Mode<rlt::mode::Evaluation<>>{});
                 rlt::add_scalar(device, device.logger, "evaluation/return/mean", result.returns_mean);
                 rlt::add_scalar(device, device.logger, "evaluation/return/std", result.returns_std);
                 rlt::add_histogram(device, device.logger, "evaluation/return", result.returns, decltype(result)::N_EPISODES);
@@ -243,12 +256,12 @@ void run(){
                 std::chrono::duration<T> training_elapsed = std::chrono::high_resolution_clock::now() - training_start;
                 std::cout << "PPO step: " << ppo_step_i << " environment step: " << on_policy_runner.step << " elapsed: " << training_elapsed.count() << "s" << std::endl;
                 rlt::add_scalar(device, device.logger, "ppo/step", ppo_step_i);
-                rlt::add_scalar(device, device.logger, "ppo/actor_learning_rate", actor_optimizer.parameters.alpha);
-                rlt::add_scalar(device, device.logger, "ppo/critic_learning_rate", critic_optimizer.parameters.alpha);
+                rlt::add_scalar(device, device.logger, "ppo/actor_learning_rate", rlt::get(device, actor_optimizer.parameters, 0).alpha);
+                rlt::add_scalar(device, device.logger, "ppo/critic_learning_rate", rlt::get(device, critic_optimizer.parameters, 0).alpha);
             }
             for (TI action_i = 0; action_i < penv::ENVIRONMENT::ACTION_DIM; action_i++) {
                 auto& last_layer = rlt::get_last_layer(ppo.actor);
-                T action_log_std = rlt::get(last_layer.log_std.parameters, 0, action_i);
+                T action_log_std = rlt::get(device, last_layer.log_std.parameters, action_i);
                 std::stringstream topic;
                 topic << "actor/action_std/" << action_i;
                 rlt::add_scalar(device, device.logger, topic.str(), rlt::math::exp(DEVICE::SPEC::MATH(), action_log_std));
@@ -298,9 +311,12 @@ void run(){
         rlt::free(device, critic_buffers);
         rlt::free(device, critic_buffers_gae);
         rlt::free(device, observation_normalizer);
-        for(auto& env : envs){
+        for(TI env_i = 0; env_i < prl::N_ENVIRONMENTS; env_i++){
+            auto& env = rlt::get_ref(device, envs, env_i);
             rlt::free(device, env);
         }
+        rlt::free(device, envs);
+        rlt::free(device, env_parameters);
         rlt::free(device, evaluation_env);
         rlt::free(device, device.logger);
     }

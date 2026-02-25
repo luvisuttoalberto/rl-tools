@@ -8,22 +8,25 @@ namespace rlt = rl_tools;
 using DEVICE = rlt::devices::DefaultCPU;
 using TI = typename DEVICE::index_t;
 using T = float;
+using TYPE_POLICY = rlt::numeric_types::Policy<T>;
 
 constexpr TI NUM_CLASSES = 2<<8;
 constexpr TI EMBEDDING_DIM = 5;
 constexpr TI BATCH_SIZE = 8;
 constexpr TI SEQ_LEN = 6;
 using INPUT_SHAPE = rlt::tensor::Shape<TI, SEQ_LEN, BATCH_SIZE, 1>;
-using EMBEDDING_LAYER_CONFIG = rlt::nn::layers::embedding::Configuration<T, TI, NUM_CLASSES, EMBEDDING_DIM>;
+using EMBEDDING_LAYER_CONFIG = rlt::nn::layers::embedding::Configuration<TYPE_POLICY, TI, NUM_CLASSES, EMBEDDING_DIM>;
 using CAPABILITY = rlt::nn::capability::Backward<>;
 using EMBEDDING_LAYER = rlt::nn::layers::embedding::Layer<EMBEDDING_LAYER_CONFIG, CAPABILITY, INPUT_SHAPE>;
 
 TEST(RL_TOOLS_NN_LAYERS_EMBEDDING, MAIN){
     DEVICE device;
-    auto rng = rlt::random::default_engine(device.random, 0);
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
     EMBEDDING_LAYER layer;
     EMBEDDING_LAYER::Buffer<> buffer;
 
+    rlt::malloc(device, rng);
+    rlt::init(device, rng);
     rlt::malloc(device, layer);
 //    rlt::init_weights(device, layer, rng);
     for(TI class_i = 0; class_i < NUM_CLASSES; class_i++){

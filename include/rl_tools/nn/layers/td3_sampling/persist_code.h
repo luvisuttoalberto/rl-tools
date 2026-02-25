@@ -13,7 +13,7 @@ RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools {
     namespace nn::layers::td3_sampling::persist_code{
         template<typename DEVICE, typename SPEC>
-            rl_tools::persist::Code finish(DEVICE& device, nn::layers::td3_sampling::LayerForward<SPEC> &layer, std::string name, rl_tools::persist::Code input, bool const_declaration=false, typename DEVICE::index_t indent=0){
+            rl_tools::persist::Code finish(DEVICE& device, nn::layers::td3_sampling::LayerForward<SPEC> &layer, std::string name, rl_tools::persist::Code input, bool const_declaration=true, typename DEVICE::index_t indent=0){
             using TI = typename DEVICE::index_t;
             std::stringstream indent_ss;
             for(TI i=0; i < indent; i++){
@@ -23,26 +23,24 @@ namespace rl_tools {
             using TI = typename DEVICE::index_t;
             std::stringstream ss, ss_header;
             ss_header << input.header;
-            ss_header << "#include <rl_tools/nn/layers/sample_and_squash/layer.h>\n";
+            ss_header << "#include <rl_tools/nn/layers/td3_sampling/layer.h>\n";
             ss << input.body;
+            std::string T_string = containers::persist::get_type_string<typename SPEC::TYPE_POLICY::DEFAULT>();
+            std::string TI_string = containers::persist::get_type_string<typename SPEC::TI>();
             ss << ind << "namespace " << name << " {\n";
-//            template<typename T_T, typename T_TI, T_TI T_DIM, typename T_PARAMETERS = DefaultParameters<T_T>, typename T_CONTAINER_TYPE_TAG = MatrixDynamicTag, typename T_INPUT_SHAPE_FACTORY = nn::layers::dense::DefaultInputShapeFactory>
-            std::string T_parameter_string = containers::persist::get_type_string<typename SPEC::T>();
+            std::string T_parameter_string = containers::persist::get_type_string<typename SPEC::TYPE_POLICY::DEFAULT>();
             ss << ind << "    using PARAMETERS = " << "struct PARAMETERS{";
             ss << ind << "        static constexpr " << T_parameter_string << " STD = " << SPEC::PARAMETERS::STD << ";\n";
             ss << ind << "    };\n";
-            ss << ind << "    using SPEC = " << "RL_TOOLS""_NAMESPACE_WRAPPER ::rl_tools::nn::layers::td3_sampling::Specification<";
-            ss << containers::persist::get_type_string<typename SPEC::T>() << ", ";
-            ss << containers::persist::get_type_string<typename SPEC::TI>() << ", ";
-            ss << SPEC::DIM << ", ";
-            ss << "PARAMETERS, ";
-            ss << "RL_TOOLS""_NAMESPACE_WRAPPER ::rl_tools::MatrixDynamicTag, ";
-//            ss << nn::layers::dense::persist::get_shape_factory_string(typename SPEC::INPUT_SHAPE_FACTORY{});
+            ss << ind << "    using CONFIG = " << "RL_TOOLS""_NAMESPACE_WRAPPER ::rl_tools::nn::layers::td3_sampling::Configuration<";
+            ss << T_string << ", ";
+            ss << TI_string << ", ";
+            ss << "PARAMETERS";
             ss << ">; \n";;
-            ss << ind << "    " << "template <typename CAPABILITY>" << "\n";
-            ss << ind << "    " << "using TEMPLATE = RL_TOOLS""_NAMESPACE_WRAPPER ::rl_tools::nn::layers::td3_sampling::Layer<CAPABILITY, SPEC>;" << "\n";
+            ss << ind << "    " << "using TEMPLATE = RL_TOOLS""_NAMESPACE_WRAPPER ::rl_tools::nn::layers::td3_sampling::BindConfiguration<CONFIG>;" << "\n";
+            ss << ind << "    " << "using INPUT_SHAPE = RL_TOOLS""_NAMESPACE_WRAPPER ::rl_tools::tensor::Shape<" << TI_string << ", " << get<0>(typename SPEC::INPUT_SHAPE{}) << ", " << get<1>(typename SPEC::INPUT_SHAPE{}) << ", " << get<2>(typename SPEC::INPUT_SHAPE{}) << ">;\n";
             ss << ind << "    " << "using CAPABILITY = " << to_string(typename SPEC::CAPABILITY{}) << ";" << "\n";
-            ss << ind << "    " << "using TYPE = RL_TOOLS""_NAMESPACE_WRAPPER ::rl_tools::nn::layers::td3_sampling::Layer<CAPABILITY, SPEC>;" << "\n";
+            ss << ind << "    " << "using TYPE = RL_TOOLS""_NAMESPACE_WRAPPER ::rl_tools::nn::layers::td3_sampling::Layer<CONFIG, CAPABILITY, INPUT_SHAPE>;" << "\n";
             std::string initializer_list;
             if constexpr(SPEC::CAPABILITY::TAG == nn::LayerCapability::Forward){
                 initializer_list = "{}";
@@ -60,11 +58,11 @@ namespace rl_tools {
                     }
                 }
             }
-            ss << ind << "    " << (const_declaration ? "const " : "") << "TYPE module = " << initializer_list << ";\n";
+            ss << ind << "    " << (const_declaration ? "constexpr " : "") << "TYPE module = " << initializer_list << ";\n";
             ss << ind << "    " << "template <typename T_TYPE = TYPE>" << "\n";
-            ss << ind << "    " << (const_declaration ? "const " : "") << "T_TYPE factory = " << initializer_list << ";" << "\n";
+            ss << ind << "    " << (const_declaration ? "constexpr " : "") << "T_TYPE factory = " << initializer_list << ";" << "\n";
             ss << ind << "    " << "template <typename T_TYPE = TYPE>" << "\n";
-            ss << ind << "    " << (const_declaration ? "const " : "") << "T_TYPE factory_function(){return T_TYPE" << initializer_list << ";" << "}\n";
+            ss << ind << "    " << (const_declaration ? "constexpr " : "") << "T_TYPE factory_function(){return T_TYPE" << initializer_list << ";" << "}\n";
             ss << ind << "}\n";
 
 
@@ -72,7 +70,7 @@ namespace rl_tools {
         }
     }
     template<typename DEVICE, typename SPEC>
-    persist::Code save_code_split(DEVICE& device, nn::layers::td3_sampling::LayerForward<SPEC> &layer, std::string name, bool const_declaration=false, typename DEVICE::index_t indent=0, bool finish=true){
+    persist::Code save_code_split(DEVICE& device, nn::layers::td3_sampling::LayerForward<SPEC> &layer, std::string name, bool const_declaration=true, typename DEVICE::index_t indent=0, bool finish=true){
         if(finish){
             return nn::layers::td3_sampling::persist_code::finish(device, layer, name, {"", ""}, const_declaration, indent);
         }
@@ -81,7 +79,7 @@ namespace rl_tools {
         }
     }
     template<typename DEVICE, typename SPEC>
-    persist::Code save_code_split(DEVICE& device, nn::layers::td3_sampling::LayerBackward<SPEC> &layer, std::string name, bool const_declaration=false, typename DEVICE::index_t indent=0, bool finish=true){
+    persist::Code save_code_split(DEVICE& device, nn::layers::td3_sampling::LayerBackward<SPEC> &layer, std::string name, bool const_declaration=true, typename DEVICE::index_t indent=0, bool finish=true){
         using TI = typename DEVICE::index_t;
         std::stringstream indent_ss;
         for(TI i=0; i < indent; i++){
@@ -114,7 +112,7 @@ namespace rl_tools {
     }
 
     template<typename DEVICE, typename SPEC>
-    persist::Code save_code_split(DEVICE& device, nn::layers::td3_sampling::LayerGradient<SPEC> &layer, std::string name, bool const_declaration=false, typename DEVICE::index_t indent=0){
+    persist::Code save_code_split(DEVICE& device, nn::layers::td3_sampling::LayerGradient<SPEC> &layer, std::string name, bool const_declaration=true, typename DEVICE::index_t indent=0){
         using TI = typename DEVICE::index_t;
         std::stringstream indent_ss;
         for(TI i=0; i < indent; i++){
@@ -147,9 +145,18 @@ namespace rl_tools {
     }
 
     template<typename DEVICE, typename SPEC>
-    std::string save_code(DEVICE& device, nn::layers::td3_sampling::LayerForward<SPEC> &layer, std::string name, bool const_declaration=false, typename DEVICE::index_t indent=0){
+    std::string save_code(DEVICE& device, nn::layers::td3_sampling::LayerForward<SPEC> &layer, std::string name, bool const_declaration=true, typename DEVICE::index_t indent=0){
         auto code = save_code_split(device, layer, name, const_declaration, indent);
         return code.header + code.body;
+    }
+    template <typename DEVICE, typename SPEC>
+    std::string nn_analytics(DEVICE& device, nn::layers::td3_sampling::LayerGradient<SPEC>& layer) {
+        std::string data;
+        data += "{";
+        data += "\"pre_clip\": " + json(device, layer.pre_clip) + ", ";
+        data += "\"output\": " + json(device, layer.output);
+        data += "}";
+        return data;
     }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END

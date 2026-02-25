@@ -4,7 +4,7 @@
 #include <rl_tools/nn/operations_cpu_mux.h>
 #include <rl_tools/nn_models/operations_generic.h>
 #include <rl_tools/nn_models/sequential/operations_generic.h>
-#include <rl_tools/containers/matrix/persist.h>
+
 #include <rl_tools/nn/optimizers/adam/operations_generic.h>
 
 namespace rlt = RL_TOOLS_NAMESPACE_WRAPPER ::rl_tools;
@@ -14,6 +14,7 @@ namespace rlt = RL_TOOLS_NAMESPACE_WRAPPER ::rl_tools;
 #include <highfive/H5File.hpp>
 
 using T = float;
+using TYPE_POLICY = rlt::numeric_types::Policy<T>;
 using DEVICE = rlt::devices::DEVICE_FACTORY<rlt::devices::DefaultCPUSpecification>;
 using TI = typename DEVICE::index_t;
 
@@ -29,17 +30,17 @@ constexpr TI DATASET_SIZE_VAL = 10000;
 constexpr TI VALIDATION_LIMIT = 50;
 
 
-using OPTIMIZER_PARAMETERS = rlt::nn::optimizers::adam::Specification<T, TI>;
+using OPTIMIZER_PARAMETERS = rlt::nn::optimizers::adam::Specification<TYPE_POLICY, TI>;
 using OPTIMIZER = rlt::nn::optimizers::Adam<OPTIMIZER_PARAMETERS>;
 
 namespace mnist_model{ // to simplify the model definition we import the sequential interface but we don't want to pollute the global namespace hence we do it in a model definition namespace
 
     using INPUT_SHAPE = rlt::tensor::Shape<TI, 1, 1, INPUT_DIM>;
-    using LAYER_1_SPEC = rlt::nn::layers::dense::Configuration<T, TI, HIDDEN_DIM, rlt::nn::activation_functions::ActivationFunction::RELU>;
+    using LAYER_1_SPEC = rlt::nn::layers::dense::Configuration<TYPE_POLICY, TI, HIDDEN_DIM, rlt::nn::activation_functions::ActivationFunction::RELU>;
     using LAYER_1 = rlt::nn::layers::dense::BindConfiguration<LAYER_1_SPEC>;
-    using LAYER_2_SPEC = rlt::nn::layers::dense::Configuration<T, TI, HIDDEN_DIM, rlt::nn::activation_functions::ActivationFunction::RELU>;
+    using LAYER_2_SPEC = rlt::nn::layers::dense::Configuration<TYPE_POLICY, TI, HIDDEN_DIM, rlt::nn::activation_functions::ActivationFunction::RELU>;
     using LAYER_2 = rlt::nn::layers::dense::BindConfiguration<LAYER_2_SPEC>;
-    using LAYER_3_SPEC = rlt::nn::layers::dense::Configuration<T, TI, OUTPUT_DIM, rlt::nn::activation_functions::ActivationFunction::IDENTITY>;
+    using LAYER_3_SPEC = rlt::nn::layers::dense::Configuration<TYPE_POLICY, TI, OUTPUT_DIM, rlt::nn::activation_functions::ActivationFunction::IDENTITY>;
     using LAYER_3 = rlt::nn::layers::dense::BindConfiguration<LAYER_3_SPEC>;
 
     template <typename T_CONTENT, typename T_NEXT_MODULE = rlt::nn_models::sequential::OutputModule>
@@ -73,6 +74,7 @@ int main(){
     rlt::Matrix<rlt::matrix::Specification<T, DEVICE::index_t, 1, OUTPUT_DIM, true, rlt::matrix::layouts::RowMajorAlignment<typename DEVICE::index_t>>> d_loss_d_output_matrix;
     rlt::Matrix<rlt::matrix::Specification<T, DEVICE::index_t, 1, INPUT_DIM, true, rlt::matrix::layouts::RowMajorAlignment<typename DEVICE::index_t>>> d_input_matrix;
 
+    rlt::malloc(device, optimizer);
     rlt::malloc(device, network);
     rlt::malloc(device, buffers);
     rlt::malloc(device, x_train);
@@ -86,15 +88,20 @@ int main(){
 
     {
         auto data_file = HighFive::File(dataset_path, HighFive::File::ReadOnly);
-        rlt::load(device, x_train, data_file.getGroup("train"), "inputs");
-        rlt::load(device, y_train, data_file.getGroup("train"), "labels");
-        rlt::load(device, x_val, data_file.getGroup("test"), "inputs");
-        rlt::load(device, y_val, data_file.getGroup("test"), "labels");
+        auto train_group = rlt::get_group(device, data_file, "train");
+        auto test_group = rlt::get_group(device, data_file, "test");
+        rlt::load(device, x_train, train_group, "inputs");
+        rlt::load(device, y_train, train_group, "labels");
+        rlt::load(device, x_val, test_group, "inputs");
+        rlt::load(device, y_val, test_group, "labels");
     }
 
 
+    rlt::init(device, optimizer);
     rlt::reset_optimizer_state(device, optimizer, network);
-    auto rng = rlt::random::default_engine(typename DEVICE::SPEC::RANDOM(), 2);
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, 2);
     rlt::init_weights(device, network, rng);
 
     constexpr TI NUM_BATCHES = DATASET_SIZE_TRAIN / BATCH_SIZE;

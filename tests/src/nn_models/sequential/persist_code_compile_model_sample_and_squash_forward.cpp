@@ -1,6 +1,6 @@
 #include <rl_tools/operations/cpu.h>
 
-#include "../../../data/nn_models_sequential_persist_code_model_sample_and_squash_forward.h"
+#include "../../../../tests/data/nn_models_sequential_persist_code_model_sample_and_squash_forward.h"
 
 #include <rl_tools/nn/operations_generic.h>
 #include <rl_tools/nn/layers/standardize/operations_generic.h>
@@ -26,7 +26,9 @@ TEST(RL_TOOLS_NN_MODELS_SEQUENTIAL_PERSIST_CODE_COMPILE, MODEL_SAMPLE_AND_SQUASH
     rlt::malloc(device, output);
     rlt::malloc(device, buffer);
 
-    auto rng = rlt::random::default_engine(device.random, 0);
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, 0);
 
     rlt::Mode<rlt::nn::layers::sample_and_squash::mode::ExternalNoise<rlt::mode::Default<>>> mode;
     rlt::copy(device, device, rl_tools_export::noise::container, buffer.content_buffer.next_content_buffer.buffer.noise);
@@ -52,7 +54,9 @@ TEST(RL_TOOLS_NN_MODELS_SEQUENTIAL_PERSIST_CODE_COMPILE, MODEL_SAMPLE_AND_SQUASH
     rlt::malloc(device, output);
     rlt::malloc(device, buffer);
 
-    auto rng = rlt::random::default_engine(device.random, 0);
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, 0);
 
     const rl_tools_export::model::TYPE module = rl_tools_export::model::factory_function(); // MSVC fix:
     rlt::evaluate(device, module, rl_tools_export::input::container, output, buffer, rng);

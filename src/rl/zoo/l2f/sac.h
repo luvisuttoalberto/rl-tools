@@ -6,11 +6,12 @@
 
 namespace rl_tools::rl::zoo::l2f::sac{
     namespace rlt = rl_tools;
-    template <typename DEVICE, typename T, typename TI, typename RNG>
+    template <typename DEVICE, typename TYPE_POLICY, typename TI, typename RNG, bool DYNAMIC_ALLOCATION=true>
     struct FACTORY{
-        using ENVIRONMENT = typename ENVIRONMENT_FACTORY<DEVICE, T, TI>::ENVIRONMENT;
-        struct LOOP_CORE_PARAMETERS: rlt::rl::algorithms::sac::loop::core::DefaultParameters<T, TI, ENVIRONMENT>{
-            struct SAC_PARAMETERS: rlt::rl::algorithms::sac::DefaultParameters<T, TI>{
+        using ENVIRONMENT = typename ENVIRONMENT_FACTORY<DEVICE, TYPE_POLICY, TI>::ENVIRONMENT;
+        struct LOOP_CORE_PARAMETERS: rlt::rl::algorithms::sac::loop::core::DefaultParameters<TYPE_POLICY, TI, ENVIRONMENT>{
+            using T = typename TYPE_POLICY::DEFAULT;
+            struct SAC_PARAMETERS: rlt::rl::algorithms::sac::DefaultParameters<TYPE_POLICY, TI>{
                 static constexpr TI ACTOR_BATCH_SIZE = 64;
                 static constexpr TI CRITIC_BATCH_SIZE = 64;
                 static constexpr TI TRAINING_INTERVAL = 5;
@@ -34,7 +35,7 @@ namespace rl_tools::rl::zoo::l2f::sac{
             static constexpr auto CRITIC_ACTIVATION_FUNCTION = rlt::nn::activation_functions::ActivationFunction::FAST_TANH;
             static constexpr TI EPISODE_STEP_LIMIT = 500;
         //            static constexpr bool SHARED_BATCH = false;
-            struct OPTIMIZER_PARAMETERS_COMMON: rlt::nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<T>{
+            struct OPTIMIZER_PARAMETERS_COMMON: rlt::nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<TYPE_POLICY>{
                 static constexpr bool ENABLE_GRADIENT_CLIPPING = true;
                 static constexpr T GRADIENT_CLIP_VALUE = 1;
                 static constexpr bool ENABLE_WEIGHT_DECAY = true;
@@ -52,6 +53,6 @@ namespace rl_tools::rl::zoo::l2f::sac{
             static constexpr bool SAMPLE_ENVIRONMENT_PARAMETERS = true;
         };
 
-        using LOOP_CORE_CONFIG = rlt::rl::algorithms::sac::loop::core::Config<T, TI, RNG, ENVIRONMENT, LOOP_CORE_PARAMETERS, rlt::rl::algorithms::sac::loop::core::ConfigApproximatorsMLP>;
+        using LOOP_CORE_CONFIG = rlt::rl::algorithms::sac::loop::core::Config<TYPE_POLICY, TI, RNG, ENVIRONMENT, LOOP_CORE_PARAMETERS, rlt::rl::algorithms::sac::loop::core::ConfigApproximatorsMLP, DYNAMIC_ALLOCATION>;
     };
 }

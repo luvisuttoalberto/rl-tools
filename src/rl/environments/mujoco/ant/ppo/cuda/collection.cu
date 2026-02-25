@@ -59,8 +59,8 @@ TEST(RL_TOOLS_RL_ENVIRONMENTS_MUJOCO_ANT, COLLECTION_CPU_GPU) {
     DEVICE device;
     DEVICE_GPU device_gpu;
     rlt::init(device_gpu);
-    auto rng = rlt::random::default_engine(DEVICE::SPEC::RANDOM(), 12);
-    auto evaluation_rng = rlt::random::default_engine(DEVICE::SPEC::RANDOM(), 12);
+    auto rng = rlt::random::default_engine(DEVICE{}, 12);
+    auto evaluation_rng = rlt::random::default_engine(DEVICE{}, 12);
     prl::PPO_TYPE ppo;
     prl::ACTOR_OPTIMIZER actor_optimizer;
     prl::PPO_TYPE::SPEC::ACTOR_TYPE actor_gpu, actor3;
@@ -95,6 +95,7 @@ TEST(RL_TOOLS_RL_ENVIRONMENTS_MUJOCO_ANT, COLLECTION_CPU_GPU) {
     rlt::init(device, on_policy_runner_gpu, envs_gpu, rng);
 
     rlt::init_weights(device, ppo.actor, rng);
+    rlt::init(device, actor_optimizer);
     rlt::reset_optimizer_state(device, ppo.actor, actor_optimizer);
     rlt::reset_forward_state(device, ppo.actor);
     rlt::zero_gradient(device, ppo.actor);

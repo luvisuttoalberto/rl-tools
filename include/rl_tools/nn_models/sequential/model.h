@@ -1,7 +1,7 @@
 #include "../../version.h"
-#if (defined(RL_TOOLS_DISABLE_INCLUDE_GUARDS) || !defined(RL_TOOLS_NN_MODELS_SEQUENTIAL_V2_MODEL_H)) && (RL_TOOLS_USE_THIS_VERSION == 1)
+#if (defined(RL_TOOLS_DISABLE_INCLUDE_GUARDS) || !defined(RL_TOOLS_NN_MODELS_SEQUENTIAL_MODEL_H)) && (RL_TOOLS_USE_THIS_VERSION == 1)
 #pragma once
-#define RL_TOOLS_NN_MODELS_SEQUENTIAL_V2_MODEL_H
+#define RL_TOOLS_NN_MODELS_SEQUENTIAL_MODEL_H
 
 #include "../../utils/generic/typing.h"
 #include "../../nn/nn.h"
@@ -34,7 +34,7 @@ namespace rl_tools::nn_models::sequential{
     //     forward
 
     template <typename SPEC>
-    constexpr auto find_output_dim() {
+    constexpr auto find_output_dim(){
         if constexpr (utils::typing::is_same_v<typename SPEC::NEXT_MODULE, OutputModule>){
             return SPEC::CONTENT::OUTPUT_DIM;
         } else {
@@ -77,7 +77,7 @@ namespace rl_tools::nn_models::sequential{
         using ORIGINAL_ROOT = T_ORIGINAL_ROOT; // saving this such that we can reuse ::Build to change capabilities and/or input shapes
         using CONTENT = T_CONTENT;
         using NEXT_MODULE = T_NEXT_MODULE;
-        using T = typename CONTENT::T;
+        using TYPE_POLICY = typename CONTENT::TYPE_POLICY;
         using TI = typename CONTENT::TI;
         using INPUT_SHAPE = typename CONTENT::INPUT_SHAPE;
         using OUTPUT_SHAPE = find_output_shape<Specification<T_ORIGINAL_ROOT, T_CONTENT, T_NEXT_MODULE>>;
@@ -133,7 +133,7 @@ namespace rl_tools::nn_models::sequential{
     struct ModuleState{
         using BUFFER_SPEC = T_BUFFER_SPEC;
         using SPEC = typename BUFFER_SPEC::SPEC;
-        using T = typename SPEC::T;
+        // using T = typename SPEC::T;
         using TI = typename SPEC::TI;
         using CONTENT_STATE = ContentState<typename BUFFER_SPEC::CONTENT_BUFFER_SPEC>;
         CONTENT_STATE content_state;
@@ -169,6 +169,7 @@ namespace rl_tools::nn_models::sequential{
     template <typename T_SPEC, bool T_DYNAMIC_ALLOCATION = true>
     struct ModuleBufferSpecification {
         using SPEC = T_SPEC;
+        using TYPE_POLICY = typename SPEC::TYPE_POLICY;
         using TI = typename SPEC::TI;
         using CONTENT = typename SPEC::CONTENT;
         static constexpr bool DYNAMIC_ALLOCATION = T_DYNAMIC_ALLOCATION;
@@ -178,11 +179,12 @@ namespace rl_tools::nn_models::sequential{
     struct ModuleBuffer{
         using BUFFER_SPEC = T_BUFFER_SPEC;
         using SPEC = typename BUFFER_SPEC::SPEC;
-        using T = typename SPEC::T;
+        using TYPE_POLICY = typename SPEC::TYPE_POLICY;
+        using T_ACCUMULATOR = typename TYPE_POLICY::template GET<numeric_types::categories::Accumulator>;
         using TI = typename SPEC::TI;
 //        static_assert(SPEC::MAX_HIDDEN_DIM > 0);
         using TICK_TOCK_CONTAINER_SHAPE = tensor::Shape<TI, SPEC::MAX_HIDDEN_DIM>; // TODO: check if this is overkill
-        using TICK_TOCK_CONTAINER_SPEC = tensor::Specification<T, TI, TICK_TOCK_CONTAINER_SHAPE, BUFFER_SPEC::DYNAMIC_ALLOCATION, tensor::RowMajorStride<TICK_TOCK_CONTAINER_SHAPE>>;
+        using TICK_TOCK_CONTAINER_SPEC = tensor::Specification<T_ACCUMULATOR, TI, TICK_TOCK_CONTAINER_SHAPE, BUFFER_SPEC::DYNAMIC_ALLOCATION, tensor::RowMajorStride<TICK_TOCK_CONTAINER_SHAPE>>;
         using TICK_TOCK_CONTAINER_TYPE = Tensor<TICK_TOCK_CONTAINER_SPEC>;
         TICK_TOCK_CONTAINER_TYPE tick;
         TICK_TOCK_CONTAINER_TYPE tock;
@@ -192,7 +194,7 @@ namespace rl_tools::nn_models::sequential{
     template <typename T_SPEC>
     struct ModuleForward{
         using SPEC = T_SPEC;
-        using T = typename SPEC::T;
+        using TYPE_POLICY = typename SPEC::TYPE_POLICY;
         using TI = typename SPEC::TI;
         using ORIGINAL_ROOT = typename SPEC::ORIGINAL_ROOT;
         using CONTENT = typename SPEC::CONTENT;
@@ -213,9 +215,12 @@ namespace rl_tools::nn_models::sequential{
     };
 
     template <typename T_SPEC>
-    struct ModuleBackward: public ModuleForward<T_SPEC>{};
+    struct ModuleBackward: public ModuleForward<T_SPEC>{
+        using PARENT = ModuleForward<T_SPEC>;
+    };
     template <typename T_SPEC>
     struct ModuleGradient: public ModuleBackward<T_SPEC>{
+        using PARENT = ModuleBackward<T_SPEC>;
         using TI = typename T_SPEC::TI;
     };
 
@@ -254,6 +259,14 @@ namespace rl_tools::nn_models::sequential{
         };
         template <typename TI, TI BATCH_SIZE>
         using CHANGE_BATCH_SIZE = typename CHANGE_BATCH_SIZE_IMPL<TI, BATCH_SIZE>::CHANGE_BATCH_SIZE;
+        template <typename TI, TI SEQUENCE_LENGTH>
+        struct CHANGE_SEQUENCE_LENGTH_IMPL{
+            using NEW_INPUT_SHAPE = tensor::Replace<INPUT_SHAPE, SEQUENCE_LENGTH, 0>;
+            using CHANGE_SEQUENCE_LENGTH = Build<CAPABILITY, MODULE, NEW_INPUT_SHAPE>;
+        };
+        template <typename TI, TI SEQUENCE_LENGTH>
+        using CHANGE_SEQUENCE_LENGTH = typename CHANGE_SEQUENCE_LENGTH_IMPL<TI, SEQUENCE_LENGTH>::CHANGE_SEQUENCE_LENGTH;
+
         template <typename NEW_CAPABILITY>
         using CHANGE_CAPABILITY = Build<NEW_CAPABILITY, MODULE, INPUT_SHAPE>;
     };

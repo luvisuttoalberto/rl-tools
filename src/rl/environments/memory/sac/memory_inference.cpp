@@ -10,8 +10,8 @@
 #include <rl_tools/nn/optimizers/adam/operations_generic.h>
 
 #ifdef RL_TOOLS_ENABLE_HDF5
-#include <rl_tools/containers/matrix/persist.h>
-#include <rl_tools/containers/tensor/persist.h>
+
+
 #include <rl_tools/nn/optimizers/adam/instance/persist.h>
 #include <rl_tools/nn/layers/sample_and_squash/persist.h>
 #include <rl_tools/nn/layers/standardize/persist.h>
@@ -35,7 +35,7 @@ namespace rlt = rl_tools;
 #include "approximators.h"
 
 using DEVICE = rlt::devices::DefaultCPU;
-using RNG = decltype(rlt::random::default_engine(typename DEVICE::SPEC::RANDOM{}));
+using RNG = DEVICE::SPEC::RANDOM::ENGINE<>;
 using T = float;
 using TI = typename DEVICE::index_t;
 
@@ -43,7 +43,9 @@ using TI = typename DEVICE::index_t;
 
 int main(){
     DEVICE device;
-    auto rng = rlt::random::default_engine(device.random, 0);
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, 0);
     std::string checkpoint = "experiments/2024-08-28_11-19-30/e64577b_sequential_algorithm_environment/sac_memory/0001/steps/000000000010000/checkpoint.h5";
     using CONFIG = ConfigApproximatorsSequential<T, TI, SEQUENCE_LENGTH, ENVIRONMENT, LOOP_CORE_PARAMETERS>;
     using CAPABILITY = rlt::nn::capability::Forward<>;

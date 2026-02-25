@@ -27,6 +27,10 @@ namespace rl_tools::math {
         return std::isnan(x);
     }
 #else
+    template <typename T>
+    bool is_nan(const devices::math::CPU, T){
+        return false;
+    }
     bool is_nan(const devices::math::CPU, const float x){
         is_nan_struct_float u;
         u.f = x;
@@ -68,7 +72,7 @@ namespace rl_tools::math {
         return std::acos(x);
     }
     template<typename TX, typename TY>
-    auto pow(const devices::math::CPU&, const TX x, const TY y) {
+    constexpr auto pow(const devices::math::CPU&, const TX x, const TY y) {
         return std::pow(x, y);
     }
     template<typename T>
@@ -98,7 +102,17 @@ namespace rl_tools::math {
     }
     template<typename T>
     T abs(const devices::math::CPU&, T x){
-        return std::abs(x);
+        if constexpr (utils::typing::is_same_v<T, float>){
+            return std::fabs(x);
+        }
+        else{
+            if constexpr (utils::typing::is_same_v<T, double>){
+                return std::abs(x);
+            }
+            else{
+                return (T)std::abs((float)x);
+            }
+        }
     }
     template<typename T>
     T nan(const devices::math::CPU&){

@@ -15,12 +15,14 @@ TEST(RL_TOOLS_RL_ENVIRONMENTS_PENDULUM_TEST, COMPARISON) {
     typedef rlt::rl::environments::pendulum::Specification<DTYPE, DEVICE::index_t, rlt::rl::environments::pendulum::DefaultParameters<DTYPE>> PENDULUM_SPEC;
     typedef rlt::rl::environments::Pendulum<PENDULUM_SPEC> ENVIRONMENT;
     std::string DATA_FILE_NAME = "pendulum.hdf5";
-    const char *data_path_stub = RL_TOOLS_MACRO_TO_STR(RL_TOOLS_TESTS_DATA_PATH);
+    const char *data_path_stub = RL_TOOLS_MACRO_TO_STR(RL_TOOLS_TEST_DATA_PATH);
     std::string DATA_FILE_PATH = std::string(data_path_stub) + "/" + DATA_FILE_NAME;
 
     DEVICE device;
     using TI = typename DEVICE::index_t;
-    auto rng = rlt::random::default_engine(DEVICE::SPEC::RANDOM{}, 0);
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, 0);
     HighFive::File file(DATA_FILE_PATH, HighFive::File::ReadOnly);
     auto episodes_group = file.getGroup("episodes");
     for(typename DEVICE::index_t episode_i = 0; episode_i < episodes_group.getNumberObjects(); episode_i++){

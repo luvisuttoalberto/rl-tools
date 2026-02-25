@@ -7,7 +7,7 @@
 #include <rl_tools/nn_models/sequential/operations_generic.h>
 #include <rl_tools/nn/optimizers/adam/operations_generic.h>
 
-#include "../../../../data/test_nn_layers_gru_persist_code.h"
+#include "../../../../../tests/data/test_nn_layers_gru_persist_code.h"
 
 // #include <highfive/H5File.hpp>
 
@@ -31,21 +31,23 @@ std::optional<std::string> get_env_var(const std::string& var) {
 using DEVICE = rlt::devices::DefaultCPU;
 using TI = typename DEVICE::index_t;
 using T = double;
+using TYPE_POLICY = rlt::numeric_types::Policy<T>;
 
 TEST(RL_TOOLS_NN_LAYERS_GRU, PERSIST_CODE_COMPILE){
     constexpr TI BATCH_SIZE = rlt::get<1>(input::SHAPE{});
     using GRU = gru::TYPE;
     typename GRU::Buffer<> buffer;
-    using ADAM_SPEC = rlt::nn::optimizers::adam::Specification<T, TI>;
+    using ADAM_SPEC = rlt::nn::optimizers::adam::Specification<TYPE_POLICY, TI>;
     using ADAM = rlt::nn::optimizers::Adam<ADAM_SPEC>;
     ADAM optimizer;
 
     rlt::Tensor<rlt::tensor::Specification<T, TI, output::SHAPE>> output_imported;
 
     DEVICE device;
-    auto rng = rlt::random::default_engine(device.random, 0);
+    typename DEVICE::SPEC::RANDOM::ENGINE<> rng;
 
 
+    rlt::init(device, rng, 0);
     rlt::malloc(device, buffer);
     rlt::malloc(device, output_imported);
 

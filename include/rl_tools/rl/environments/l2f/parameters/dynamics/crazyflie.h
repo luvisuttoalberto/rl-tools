@@ -6,8 +6,8 @@
 
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools::rl::environments::l2f::parameters::dynamics{
-    template<typename SPEC, typename = rl_tools::utils::typing::enable_if_t<SPEC::N == 4>> // Crazyflie is a quadrotor
-    constexpr typename ParametersBase<SPEC>::Dynamics crazy_flie = {
+    template<typename T, typename TI> // Crazyflie is a quadrotor
+    constexpr Dynamics<T, TI, 4> crazyflie = {
             // Rotor positions
             {
                     {
@@ -47,57 +47,77 @@ namespace rl_tools::rl::environments::l2f::parameters::dynamics{
             },
             // thrust constants
             {
-                    0.0213,
-                    -0.0112,
-                    0.1201
+                    // {0.0213, -0.0112, 0.1201},
+                    // {0.0213, -0.0112, 0.1201},
+                    // {0.0213, -0.0112, 0.1201},
+                    // {0.0213, -0.0112, 0.1201}
+                    // {0, 0, 0.1302},
+                    // {0, 0, 0.1302},
+                    // {0, 0, 0.1302},
+                    // {0, 0, 0.1302}
+                    {0.00352526, 0.01437313, 0.09223048},
+                    {0.00352526, 0.01437313, 0.09223048},
+                    {0.00352526, 0.01437313, 0.09223048},
+                    {0.00352526, 0.01437313, 0.09223048},
             },
             // torque constant
-            4.665e-3,
+            {4.665e-3, 4.665e-3, 4.665e-3, 4.665e-3},
+            // T, RPM time constant
+            { // rising: ~(0.040 - 0.080)s from manufacturer plot
+                    0.05545454545454546,
+                    0.05545454545454546,
+                    0.05545454545454546,
+                    0.05545454545454546
+            },
+            { // falling: ~0.398s from manufacturer plot
+                    0.24939393939393945,
+                    0.24939393939393945,
+                    0.24939393939393945,
+                    0.24939393939393945
+            },
             // mass vehicle
-            0.027,
+            0.027 + 0.0017 + 0.0003 + 0.0016, // take-off-weight, sd card deck, sd card, optical flow deck (v2)
             // gravity
             {0, 0, -9.81},
             // J
             {
                     {
-                            1.029e-5,
+                            9.416556729130406e-06,
                             0.0,
                             0.0
                     },
                     {
                             0.0,
-                            1.105e-5,
+                            9.644051701582312e-06,
                             0.0
                     },
                     {
                             0.0,
                             0.0,
-                            2.005e-5
+                            1.745951732253285e-05
                     }
             },
             // J_inv
             {
                     {
-                            97181.7298347911,
+                            106195.93007988465,
                             0.0,
                             0.0
                     },
                     {
                             0.0,
-                            90497.7375565611,
+                            103690.85846314249,
                             0.0
                     },
                     {
                             0.0,
                             0.0,
-                            49875.3117206983
+                            57275.35197719487
                     }
             },
-            // T, RPM time constant
-            0.072,
             // hovering throttle (julia): sqrt((mass * 9.81/4 - thrust_curve[1])/thrust_curve[3]),
 //            "hovering_throttle": 14475.809152959684,
-            0.6670265023020774, // "hovering_throttle_relative"
+            0.7261389721508553, // "hovering_throttle_relative"
             // action limit
             {0, 1},
     };

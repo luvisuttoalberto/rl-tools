@@ -8,8 +8,10 @@
     #define RL_TOOLS_DEVICES_CUDA_CEIL(A, B) (A / B + (A % B == 0 ? 0 : 1))
 
     #include "../../devices/cuda.h"
+    #include "../../numeric_types/policy.h"
     #include "../../math/operations_cuda.h"
     #include "../../logging/operations_cuda.h"
+    #include "../../utils/env/operations_generic.h"
 #else
     #error "Group 1 already imported"
 #endif

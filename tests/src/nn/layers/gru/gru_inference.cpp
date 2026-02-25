@@ -7,12 +7,14 @@
 #include <rl_tools/nn_models/sequential/operations_generic.h>
 #include <rl_tools/nn/optimizers/adam/operations_generic.h>
 
-#include <rl_tools/containers/tensor/persist.h>
+
 #include <rl_tools/nn/optimizers/adam/instance/persist.h>
 #include <rl_tools/nn/layers/embedding/persist.h>
 #include <rl_tools/nn/layers/gru/persist.h>
 #include <rl_tools/nn/layers/dense/persist.h>
 #include <rl_tools/nn_models/sequential/persist.h>
+
+#include <rl_tools/utils/extrack/operations_cpu.h>
 
 namespace rlt = rl_tools;
 
@@ -24,15 +26,33 @@ namespace rlt = rl_tools;
 #include <thread>
 
 using DEVICE = rlt::devices::DEVICE_FACTORY<>;
-using TI = typename DEVICE::index_t;
 using T = float;
-using CONFIG = Config<T, TI>;
+using TYPE_POLICY = rlt::numeric_types::Policy<T>;
+using TI = typename DEVICE::index_t;
+using CONFIG = Config<TYPE_POLICY, TI>;
 
 
 
 int main() {
     DEVICE device;
-    auto rng = rlt::random::default_engine(device.random, 0);
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::init(device, rng, 0);
+
+
+    rlt::utils::extrack::Path run;
+    run.name = "gru-enwik";
+    run.step = std::to_string(600000);
+    run.require_checkpoint = true;
+    bool found_run = rlt::find_latest_run(device, "experiments", run);
+    if(found_run){
+        std::cout << "found run: " << run.checkpoint_path << std::endl;
+    }
+    else{
+        std::cout << "could not find run: " << run.checkpoint_path << std::endl;
+        std::exit(1);
+    }
+
+
 
 
 
@@ -44,11 +64,12 @@ int main() {
     rlt::malloc(device, model);
     rlt::malloc(device, buffer);
     rlt::malloc(device, input);
-    std::filesystem::path FILE_PATH = "model_checkpoint.h5";
+    std::filesystem::path FILE_PATH = run.checkpoint_path;
 
     {
         auto file = HighFive::File(FILE_PATH.string(), HighFive::File::ReadOnly);
-        rlt::load(device, model, file.getGroup("checkpoint"));
+        auto checkpoint_group = rlt::get_group(device, file, "checkpoint");
+        rlt::load(device, model, checkpoint_group);
     }
 
     std::string input_string;
@@ -60,10 +81,15 @@ int main() {
         if(input_string.size() > CONFIG::PARAMS::SEQUENCE_LENGTH){
             input_string = input_string.substr(input_string.size() - CONFIG::PARAMS::SEQUENCE_LENGTH, CONFIG::PARAMS::SEQUENCE_LENGTH);
         }
+        rlt::set_all(device, input, 0);
         for(TI batch_i = 0; batch_i < CONFIG::PARAMS::BATCH_SIZE; batch_i++){
             for(TI sequence_i = 0; sequence_i < CONFIG::PARAMS::SEQUENCE_LENGTH; sequence_i++){
                 if(sequence_i < input_string.size()) {
-                    rlt::set(device, input, input_string[sequence_i], sequence_i, batch_i, 0);
+                    char input_char = input_string[sequence_i];
+                    if(input_char < 0) {
+                        input_char = '?';
+                    }
+                    rlt::set(device, input, input_char, sequence_i, batch_i, 0);
                 }
             }
         }
@@ -99,8 +125,6 @@ int main() {
 //        std::cout << input_string << std::endl;
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
-
-
-
     return 0;
 }
+

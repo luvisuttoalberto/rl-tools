@@ -7,8 +7,8 @@
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools::rl::environments::l2f::parameters::dynamics{
     namespace x500{
-        template<typename SPEC, typename = rl_tools::utils::typing::enable_if_t<SPEC::N == 4>> // This is a quadrotor
-        constexpr typename ParametersBase<SPEC>::Dynamics sim = {
+        template<typename T, typename TI>
+        constexpr Dynamics<T, TI, 4> sim = {
             // Rotor positions
             {
                 {
@@ -50,13 +50,17 @@ namespace rl_tools::rl::environments::l2f::parameters::dynamics{
             },
             // thrust constants
             {
-                0,
-                0,
-                8.74
+                {0, 0, 8.74},
+                {0, 0, 8.74},
+                {0, 0, 8.74},
+                {0, 0, 8.74}
             },
             // torque constant
 //            0.025126582278481014,
-            0.11697849233439939,
+            {0.11697849233439939, 0.11697849233439939, 0.11697849233439939, 0.11697849233439939},
+            // T, RPM time constant
+            {0.03, 0.03, 0.03, 0.03},
+            {0.03, 0.03, 0.03, 0.03},
             // mass vehicle
             2.000,
             // gravity
@@ -97,8 +101,6 @@ namespace rl_tools::rl::environments::l2f::parameters::dynamics{
                     25
                 }
             },
-            // T, RPM time constant
-            0.03,
             // hovering throttle (julia): sqrt((mass * 9.81/4 - thrust_curve[1])/thrust_curve[3]),
             0.749141384950337, //julia sqrt((mass * 9.81/4 - thrust_curve[1])/thrust_curve[3])
             // action limit

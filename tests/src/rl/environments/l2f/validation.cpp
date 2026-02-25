@@ -1,6 +1,7 @@
 #include <rl_tools/operations/cpu.h>
-#include <rl_tools/rl/environments/l2f/parameters/default.h>
+#include <rl_tools/rl/environments/l2f/operations_multitask_generic_forward.h>
 #include <rl_tools/rl/environments/l2f/operations_cpu.h>
+#include <rl_tools/rl/environments/l2f/operations_multitask_generic.h>
 
 #include <nlohmann/json.hpp>
 #include <fstream>
@@ -12,7 +13,7 @@
 namespace rlt = rl_tools;
 
 using DEVICE = rlt::devices::DefaultCPU;
-using RNG = decltype(rlt::random::default_engine(typename DEVICE::SPEC::RANDOM{}));
+using RNG = DEVICE::SPEC::RANDOM::ENGINE<>;
 using T = double;
 using TI = typename DEVICE::index_t;
 
@@ -24,30 +25,20 @@ namespace static_parameter_builder{
     using namespace rl_tools::rl::environments::l2f;
     static constexpr bool CLOSED_FORM = true;
     struct ENVIRONMENT_STATIC_PARAMETERS{
+        static constexpr TI N_SUBSTEPS = 1;
         static constexpr TI ACTION_HISTORY_LENGTH = 16;
-        using STATE_BASE = StateBase<T, TI>;
-        using STATE_TYPE = StateRotorsHistory<T, TI, ACTION_HISTORY_LENGTH, CLOSED_FORM, StateRandomForce<T, TI, STATE_BASE>>;
-        using OBSERVATION_TYPE = observation::Position<observation::PositionSpecification<T, TI,
-                observation::OrientationRotationMatrix<observation::OrientationRotationMatrixSpecification<T, TI,
-                observation::LinearVelocity<observation::LinearVelocitySpecification<T, TI,
-                observation::AngularVelocity<observation::AngularVelocitySpecification<T, TI,
-                observation::ActionHistory<observation::ActionHistorySpecification<T, TI, ACTION_HISTORY_LENGTH>>>>>>>>>>;
-        using OBSERVATION_TYPE_PRIVILEGED = observation::Position<observation::PositionSpecificationPrivileged<T, TI,
-                observation::OrientationRotationMatrix<observation::OrientationRotationMatrixSpecificationPrivileged<T, TI,
-                observation::LinearVelocity<observation::LinearVelocitySpecificationPrivileged<T, TI,
-                observation::AngularVelocity<observation::AngularVelocitySpecificationPrivileged<T, TI,
-                observation::RandomForce<observation::RandomForceSpecification<T, TI,
-                observation::RotorSpeeds<observation::RotorSpeedsSpecification<T, TI>>
-        >
-        >
-        >>
-        >>
-        >>
-        >>;
+        static constexpr TI EPISODE_STEP_LIMIT = 500;
+        using STATE_BASE = StateBase<StateSpecification<T, TI>>;
+        using STATE_TYPE = DefaultActionHistoryState<T, TI, ACTION_HISTORY_LENGTH, 0, CLOSED_FORM>;// StateRotorsHistory<StateRotorsHistorySpecification<T, TI, ACTION_HISTORY_LENGTH, CLOSED_FORM, StateRandomForce<StateSpecification<T, TI, STATE_BASE>>>>;
+        using OBSERVATION_TYPE = DefaultActionHistoryObservation<T, TI, ACTION_HISTORY_LENGTH>;
+        using OBSERVATION_TYPE_PRIVILEGED = DefaultObservation<T, TI, 0, observation::RandomForce<observation::RandomForceSpecification<T, TI, observation::RotorSpeeds<observation::RotorSpeedsSpecification<T, TI>> >>>;
         static constexpr bool PRIVILEGED_OBSERVATION_NOISE = false;
-        using PARAMETER_FACTORY = parameters::DefaultParameters<T, TI>;
-        static constexpr auto PARAMETER_VALUES = PARAMETER_FACTORY::parameters;
+        using PARAMETER_FACTORY = parameters::DEFAULT_PARAMETERS_FACTORY<T, TI>;
+        static constexpr auto PARAMETER_VALUES = PARAMETER_FACTORY::nominal_parameters;
         using PARAMETERS = typename PARAMETER_FACTORY::PARAMETERS_TYPE;
+        static constexpr T STATE_LIMIT_POSITION = 100000;
+        static constexpr T STATE_LIMIT_VELOCITY = 100000;
+        static constexpr T STATE_LIMIT_ANGULAR_VELOCITY = 100000;
     };
 }
 
@@ -81,9 +72,11 @@ ENVIRONMENT::State parse_state(DEVICE& device, ENVIRONMENT& env, ENVIRONMENT::St
 
 TEST(RL_TOOLS_RL_ENVIRONMENTS_L2F, VALIDATION) {
     DEVICE device;
-    auto rng = rlt::random::default_engine(DEVICE::SPEC::RANDOM{}, 0);
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, 0);
     std::string DATA_FILE_NAME = "quad_dynamics.json";
-    const char *data_path_stub = RL_TOOLS_MACRO_TO_STR(RL_TOOLS_TESTS_DATA_PATH);
+    const char *data_path_stub = RL_TOOLS_MACRO_TO_STR(RL_TOOLS_TEST_DATA_PATH);
     std::string DATA_FILE_PATH = std::string(data_path_stub) + "/" + DATA_FILE_NAME;
     std::cout << "DATA_FILE_PATH: " << DATA_FILE_PATH << std::endl;
     std::ifstream ifs(DATA_FILE_PATH);
@@ -107,13 +100,16 @@ TEST(RL_TOOLS_RL_ENVIRONMENTS_L2F, VALIDATION) {
     parameters.dynamics.J_inv[0][0] = 1.0 / parameters.dynamics.J[0][0];
     parameters.dynamics.J_inv[1][1] = 1.0 / parameters.dynamics.J[1][1];
     parameters.dynamics.J_inv[2][2] = 1.0 / parameters.dynamics.J[2][2];
-    parameters.dynamics.rotor_thrust_coefficients[0] = j["dynamics"]["thrust_curve"]["data"][0];
-    parameters.dynamics.rotor_thrust_coefficients[1] = j["dynamics"]["thrust_curve"]["data"][1];
-    parameters.dynamics.rotor_thrust_coefficients[2] = j["dynamics"]["thrust_curve"]["data"][2];
-    parameters.dynamics.rotor_torque_constant = j["dynamics"]["torque_constant"];
+    for (TI rotor_i = 0; rotor_i < ENVIRONMENT::Parameters::N; rotor_i++){
+        parameters.dynamics.rotor_thrust_coefficients[rotor_i][0] = j["dynamics"]["thrust_curve"]["data"][rotor_i][0];
+        parameters.dynamics.rotor_thrust_coefficients[rotor_i][1] = j["dynamics"]["thrust_curve"]["data"][rotor_i][1];
+        parameters.dynamics.rotor_thrust_coefficients[rotor_i][2] = j["dynamics"]["thrust_curve"]["data"][rotor_i][2];
+        parameters.dynamics.rotor_torque_constants[rotor_i] = j["dynamics"]["torque_constant"];
+        parameters.dynamics.rotor_time_constants_rising[rotor_i] = j["dynamics"]["motor_time_constant"];
+        parameters.dynamics.rotor_time_constants_falling[rotor_i] = j["dynamics"]["motor_time_constant"];
+    }
     parameters.dynamics.action_limit.min = 0;
     parameters.dynamics.action_limit.max = 1;
-    parameters.dynamics.motor_time_constant = j["dynamics"]["motor_time_constant"];
 
     for(TI trajectory_i = 0; trajectory_i < j["trajectories"].size(); trajectory_i++){
         auto trajectory = j["trajectories"][trajectory_i];

@@ -5,6 +5,7 @@
 
 #include "../utils/generic/typing.h"
 #include "devices.h"
+#include <cstdint>
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools::devices{
     namespace dummy{
@@ -22,7 +23,10 @@ namespace rl_tools::devices{
     namespace random{
         struct Dummy:devices::random::Generic<devices::math::Dummy>, dummy::Base{
             static constexpr Type TYPE = Type::random;
-            using State = unsigned;
+            template <typename T_ENGINE = void>
+            struct ENGINE{
+                unsigned state;
+            };
         };
     }
     namespace logging{

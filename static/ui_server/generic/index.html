@@ -22,11 +22,22 @@
         {
             "imports": {
                 "three": "./lib/three.module.js",
-                "three-orbitcontrols": "./lib/OrbitControls.js"
+                "three-orbitcontrols": "./lib/OrbitControls.js",
+                "three-gltfloader": "./lib/gltf-loader/GLTFLoader.js"
             }
         }
     </script>
     <script>
+        function check_dependency(path){
+            fetch(path).then((response) => {
+                if(!response.ok){
+                    alert(`Error: Could not load dependency: ${path}. Please run \`./download_dependencies.sh\` in the \`./static/extrack_ui\` directory`)
+                }
+            })
+        }
+        check_dependency("./lib/three.module.js")
+        check_dependency("./lib/OrbitControls.js")
+        check_dependency("./lib/GLTFLoader.js")
         class Client{
             constructor(restart_callback){
                 this.setParametersCallback = null;
@@ -131,14 +142,28 @@
 
 
             let episode_initialized = false
+            let multi = false;
             let ui_module = null;
             let ui_state = null;
             let state = null;
 
 
             const renderLoop = async () => {
-                if(ui_module && ui_state && episode_initialized && state){
-                    await (await ui_module).render(await ui_state, parameters, state.state, state.action)
+                try{
+                    if(ui_module && ui_state && episode_initialized && state){
+                        const uim = await ui_module;
+                        const uis = await ui_state;
+                        if(multi){
+                            console.assert(Array.isArray(parameters) && Array.isArray(state.state) && Array.isArray(state.action))
+                            await uim.render_multi(uis, parameters, state.state, state.action)
+                        }
+                        else{
+                            await uim.render(uis, parameters, state.state, state.action)
+                        }
+                    }
+                }
+                catch(error){
+                    console.error('Error during render loop:', error);
                 }
                 requestAnimationFrame(renderLoop);
             }
@@ -148,9 +173,22 @@
                     console.log('Parameters:', new_parameters);
                     parameters = new_parameters
                     if(ui_module && ui_state){
-                        if((await ui_module).episode_init){
-                            await (await ui_module).episode_init((await ui_state), parameters)
+                        const uim = await ui_module;
+                        const uis = await ui_state;
+                        if(Array.isArray(parameters)){
+                            console.assert(uim.episode_init_multi)
+                            await uim.episode_init_multi(uis, parameters)
                             episode_initialized = true
+                            multi = true;
+                            state = null
+                        }
+                        else{
+                            if((await ui_module).episode_init){
+                                await uim.episode_init(uis, parameters)
+                                multi = false;
+                                episode_initialized = true
+                                state = null
+                            }
                         }
                     }
                     else{
@@ -176,14 +214,26 @@
                     console.log('UI:', ui);
                     if(ui.type === "2d"){
                         if(!ui_module){
-                            const blob = new Blob([ui.render_function], { type: 'application/javascript' });
-                            const url = URL.createObjectURL(blob);
-                            ui_module = import(url)
+                            let url = null
+                            if(!ui.debug){
+                                const blob = new Blob([ui.render_function], { type: 'application/javascript' });
+                                url = URL.createObjectURL(blob);
+                                ui_module = import(url)
+                            }
+                            else{
+                                ui_module = import(`./debug/${ui.debug}`)
+                            }
                             ui_state = ui_module.then(async (module)=>{
-                                URL.revokeObjectURL(url);
-                                ui_state = await module.init(canvas, {devicePixelRatio: window.devicePixelRatio})
+                                if(url){
+                                    URL.revokeObjectURL(url);
+                                }
+                                const options = {...{devicePixelRatio: window.devicePixelRatio}, ...ui.options}
+                                ui_state = await module.init(canvas, options)
                                 if(ui_state.cursor_grab){
-                                    this.canvas.style.cursor = "grab"
+                                    canvas.style.cursor = "grab"
+                                }
+                                else{
+                                    canvas.style.cursor = "default"
                                 }
                                 renderLoop()
                                 return ui_state

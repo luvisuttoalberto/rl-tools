@@ -16,7 +16,7 @@
 #include <rl_tools/nn/loss_functions/mse/operations_cuda.h>
 #include <rl_tools/nn_models/operations_generic.h>
 #include <rl_tools/nn_models/operations_cpu.h>
-#include <rl_tools/nn/optimizers/adam/operations_generic.h>
+#include <rl_tools/nn/optimizers/adam/operations_cuda.h>
 
 namespace rlt = RL_TOOLS_NAMESPACE_WRAPPER ::rl_tools;
 
@@ -29,6 +29,7 @@ void COPY_CONTAINER() {
 
     DEVICE_CUDA device_cuda;
     DEVICE_CPU device_cpu;
+    rlt::init(device_cuda);
 
     {
         rlt::Matrix<rlt::matrix::Specification<T, DEVICE_CPU::index_t, DIM_1, DIM_2>> matrix_cpu;
@@ -93,33 +94,37 @@ void COPY_CONTAINER() {
         static_assert(DIM_4 >= DIM_2);
         rlt::Matrix<rlt::matrix::Specification<T, DEVICE_CPU::index_t, DIM_1, DIM_2>> matrix_cpu;
         rlt::Matrix<rlt::matrix::Specification<T, DEVICE_CUDA::index_t, DIM_3, DIM_4, true, rlt::matrix::layouts::RowMajorAlignment<DEVICE_CPU::index_t, ALIGNMENT_3>>> matrix_cuda_data;
-        static_assert(OFFSET_3 < DIM_3);
-        static_assert(OFFSET_4 < DIM_4);
+        static_assert((OFFSET_3 + DIM_1) < DIM_3);
+        static_assert((OFFSET_4 + DIM_2) < DIM_4);
+        rlt::malloc(device_cuda, matrix_cuda_data);
         auto matrix_cuda = rlt::view<DEVICE_CUDA, typename decltype(matrix_cuda_data)::SPEC, DIM_1, DIM_2>(device_cuda, matrix_cuda_data, OFFSET_3, OFFSET_4);
         rlt::Matrix<rlt::matrix::Specification<T, DEVICE_CUDA::index_t, DIM_1, DIM_2, true, rlt::matrix::layouts::RowMajorAlignment<DEVICE_CPU::index_t, ALIGNMENT_4>>> matrix_cuda2;
 
         rlt::Matrix<rlt::matrix::Specification<T, DEVICE_CPU::index_t, DIM_1, DIM_2>> matrix_cpu2;
         rlt::malloc(device_cpu, matrix_cpu);
-        rlt::malloc(device_cuda, matrix_cuda);
         rlt::malloc(device_cuda, matrix_cuda2);
         rlt::malloc(device_cpu, matrix_cpu2);
 
-        auto rng = rlt::random::default_engine(decltype(device_cpu)::SPEC::RANDOM());
+        DEVICE_CPU::SPEC::RANDOM::ENGINE<> rng;
+        rlt::init(device_cpu, rng);
 
         for(DEVICE_CPU::index_t row_i = 0; row_i < decltype(matrix_cpu)::SPEC::ROWS; row_i++){
             for(DEVICE_CPU::index_t col_i = 0; col_i < decltype(matrix_cpu)::SPEC::COLS; col_i++){
-                set(matrix_cpu, row_i, col_i, rlt::random::normal_distribution::sample(decltype(device_cpu)::SPEC::RANDOM(), (T)0, (T)1, rng));
+                set(matrix_cpu, row_i, col_i, rlt::random::normal_distribution::sample(device_cpu.random, (T)0, (T)1, rng));
             }
         }
 
         rlt::copy(device_cpu, device_cuda, matrix_cpu, matrix_cuda);
         increment(matrix_cpu, OFFSET_1, OFFSET_2, 17);
         rlt::copy(device_cuda, device_cuda, matrix_cuda, matrix_cuda2);
-        rlt::copy(device_cuda, device_cpu, matrix_cuda2, matrix_cpu2);
+        rlt::copy(device_cuda, device_cpu, matrix_cuda, matrix_cpu2);
         auto diff = rlt::abs_diff(device_cpu, matrix_cpu, matrix_cpu2);
+        if (rlt::math::abs(device_cpu.math, diff - 17) > 1e-5){
+            std::cout << "diff: " << diff << std::endl;
+        }
         ASSERT_FLOAT_EQ(diff, 17.0f);
         rlt::free(device_cpu, matrix_cpu);
-        rlt::free(device_cuda, matrix_cuda);
+        rlt::free(device_cuda, matrix_cuda_data);
         rlt::free(device_cuda, matrix_cuda2);
         rlt::free(device_cpu, matrix_cpu2);
     }
@@ -129,72 +134,60 @@ TEST(RL_TOOLS_NN_CUDA, COPY_CONTAINER){
 /*
 template <typename T, typename TI, TI DIM_1, TI DIM_2, TI OFFSET_1, TI OFFSET_2, TI ALIGNMENT_1, TI ALIGNMENT_2, TI DIM_3, TI DIM_4, TI OFFSET_3, TI OFFSET_4, TI ALIGNMENT_3, TI ALIGNMENT_4>
     julia code to generate fuzzing calls
-    s(dtype, dim_1, dim_2, alignment_1, alignment_2, dim_3, dim_4, alignment_3, alignment_4) = "COPY_CONTAINER<$dtype, unsigned int, $dim_1, $dim_2, $(rand(0:(dim_1-1))), $(rand(0:(dim_2-1))), $alignment_1, $alignment_2, $dim_3, $dim_4, $(rand(0:(dim_3-1))), $(rand(0:(dim_4-1))), $alignment_3, $alignment_4>();\n"
+    s(dtype, dim_1, dim_2, alignment_1, alignment_2, dim_3, dim_4, alignment_3, alignment_4) = "COPY_CONTAINER<$dtype, unsigned int, $dim_1, $dim_2, $(rand(0:(dim_1-1))), $(rand(0:(dim_2-1))), $alignment_1, $alignment_2, $dim_3, $dim_4, $(rand(0:(dim_3-dim_1-1))), $(rand(0:(dim_4-dim_2-1))), $alignment_3, $alignment_4>();\n"
     t(dtype, dim_1, dim_2, alignment_1, alignment_2, alignment_3, alignment_4) = s(dtype, dim_1, dim_2, alignment_1, alignment_2, dim_1 + rand(0:1000), dim_2 + rand(0:1000), alignment_3, alignment_4)
     print(reduce((a,c)->a * t((rand(0:1) == 0 ? "float" : "double"), rand(1:1000), rand(1:1000), rand(1:1000), rand(1:1000), rand(1:1000), rand(1:1000)), 1:50, init=""))
 */
-//    COPY_CONTAINER<float, unsigned int, 10, 10, 9, 1, 13, 13, 30, 63, 5, 7, 13, 563>();
-//    COPY_CONTAINER<double, unsigned int, 77, 809, 26, 582, 598, 856, 87, 904, 61, 72, 96, 908>();
-    COPY_CONTAINER<float, unsigned int, 368, 885, 60, 766, 968, 990, 472, 1676, 47, 1111, 160, 359>();
-    COPY_CONTAINER<double, unsigned int, 87, 986, 22, 592, 209, 41, 771, 1635, 409, 1304, 937, 692>();
-    COPY_CONTAINER<float, unsigned int, 764, 121, 28, 108, 156, 614, 1175, 496, 1048, 196, 596, 537>();
-    COPY_CONTAINER<float, unsigned int, 920, 444, 479, 355, 552, 723, 1189, 698, 336, 339, 267, 172>();
-    COPY_CONTAINER<double, unsigned int, 982, 400, 515, 93, 641, 808, 1844, 782, 1457, 87, 821, 883>();
-    COPY_CONTAINER<double, unsigned int, 912, 613, 250, 271, 287, 235, 927, 697, 603, 207, 233, 793>();
-    COPY_CONTAINER<double, unsigned int, 693, 342, 99, 100, 399, 603, 1338, 846, 591, 405, 649, 885>();
-    COPY_CONTAINER<float, unsigned int, 852, 894, 635, 673, 171, 72, 1202, 1513, 843, 241, 135, 959>();
-    COPY_CONTAINER<double, unsigned int, 948, 611, 172, 570, 652, 83, 1176, 1111, 260, 418, 536, 572>();
-    COPY_CONTAINER<float, unsigned int, 368, 885, 60, 766, 968, 990, 472, 1676, 47, 1111, 160, 359>();
-    COPY_CONTAINER<double, unsigned int, 87, 986, 22, 592, 209, 41, 771, 1635, 409, 1304, 937, 692>();
-    COPY_CONTAINER<float, unsigned int, 764, 121, 28, 108, 156, 614, 1175, 496, 1048, 196, 596, 537>();
-    COPY_CONTAINER<float, unsigned int, 920, 444, 479, 355, 552, 723, 1189, 698, 336, 339, 267, 172>();
-    COPY_CONTAINER<double, unsigned int, 982, 400, 515, 93, 641, 808, 1844, 782, 1457, 87, 821, 883>();
-    COPY_CONTAINER<double, unsigned int, 912, 613, 250, 271, 287, 235, 927, 697, 603, 207, 233, 793>();
-    COPY_CONTAINER<double, unsigned int, 693, 342, 99, 100, 399, 603, 1338, 846, 591, 405, 649, 885>();
-    COPY_CONTAINER<float, unsigned int, 852, 894, 635, 673, 171, 72, 1202, 1513, 843, 241, 135, 959>();
-    COPY_CONTAINER<double, unsigned int, 948, 611, 172, 570, 652, 83, 1176, 1111, 260, 418, 536, 572>();
-    COPY_CONTAINER<double, unsigned int, 660, 152, 317, 87, 621, 458, 823, 457, 712, 51, 516, 568>();
-    COPY_CONTAINER<double, unsigned int, 660, 466, 42, 13, 789, 704, 1495, 1466, 754, 899, 589, 426>();
-    COPY_CONTAINER<float, unsigned int, 181, 83, 81, 26, 276, 84, 638, 175, 302, 136, 339, 553>();
-    COPY_CONTAINER<float, unsigned int, 664, 993, 84, 607, 670, 613, 1092, 1084, 791, 740, 136, 30>();
-    COPY_CONTAINER<float, unsigned int, 84, 929, 56, 489, 240, 175, 181, 1482, 152, 1066, 57, 428>();
-    COPY_CONTAINER<double, unsigned int, 854, 935, 431, 588, 994, 915, 1838, 1487, 1272, 874, 588, 487>();
-    COPY_CONTAINER<double, unsigned int, 133, 299, 89, 170, 64, 226, 625, 609, 370, 402, 1, 170>();
-    COPY_CONTAINER<double, unsigned int, 743, 106, 438, 66, 282, 763, 1008, 963, 594, 765, 487, 100>();
-    COPY_CONTAINER<double, unsigned int, 754, 58, 226, 57, 803, 467, 1719, 324, 837, 202, 287, 904>();
-    COPY_CONTAINER<float, unsigned int, 13, 192, 3, 85, 397, 515, 747, 883, 720, 822, 624, 88>();
-    COPY_CONTAINER<double, unsigned int, 931, 293, 115, 130, 754, 857, 1883, 1246, 753, 721, 965, 55>();
-    COPY_CONTAINER<double, unsigned int, 318, 428, 256, 419, 742, 406, 1081, 609, 436, 1, 871, 759>();
-    COPY_CONTAINER<float, unsigned int, 911, 462, 849, 224, 793, 562, 1418, 631, 1414, 54, 948, 156>();
-    COPY_CONTAINER<double, unsigned int, 952, 499, 6, 305, 908, 288, 1046, 1142, 460, 186, 610, 469>();
-    COPY_CONTAINER<double, unsigned int, 578, 780, 225, 724, 931, 256, 1514, 791, 327, 617, 438, 616>();
-    COPY_CONTAINER<double, unsigned int, 765, 902, 139, 751, 763, 494, 1180, 1111, 901, 406, 641, 208>();
-    COPY_CONTAINER<float, unsigned int, 709, 613, 385, 585, 36, 811, 1134, 805, 520, 774, 124, 555>();
-    COPY_CONTAINER<float, unsigned int, 892, 280, 466, 176, 757, 194, 1181, 661, 874, 547, 483, 73>();
-    COPY_CONTAINER<double, unsigned int, 680, 182, 231, 178, 191, 278, 884, 1103, 123, 253, 680, 126>();
-    COPY_CONTAINER<double, unsigned int, 77, 419, 37, 347, 205, 913, 798, 465, 399, 404, 603, 911>();
-    COPY_CONTAINER<float, unsigned int, 170, 75, 72, 50, 313, 441, 1096, 105, 396, 30, 163, 27>();
-    COPY_CONTAINER<float, unsigned int, 199, 562, 106, 315, 508, 821, 472, 1113, 253, 1095, 216, 261>();
-    COPY_CONTAINER<double, unsigned int, 869, 778, 461, 724, 766, 752, 1081, 1021, 415, 53, 268, 248>();
-    COPY_CONTAINER<float, unsigned int, 942, 776, 571, 462, 234, 89, 1783, 1082, 1639, 864, 400, 888>();
-    COPY_CONTAINER<double, unsigned int, 461, 525, 430, 79, 372, 88, 940, 694, 765, 552, 625, 495>();
-    COPY_CONTAINER<double, unsigned int, 640, 730, 186, 646, 234, 609, 1364, 1648, 452, 1478, 840, 732>();
-    COPY_CONTAINER<float, unsigned int, 929, 15, 223, 13, 331, 497, 1374, 404, 914, 267, 938, 900>();
-    COPY_CONTAINER<double, unsigned int, 948, 126, 309, 8, 896, 461, 1937, 1075, 1529, 1062, 930, 852>();
-    COPY_CONTAINER<double, unsigned int, 926, 737, 38, 2, 910, 581, 1641, 1064, 1472, 812, 13, 922>();
-    COPY_CONTAINER<double, unsigned int, 952, 187, 744, 65, 228, 27, 1461, 287, 324, 65, 961, 512>();
-    COPY_CONTAINER<double, unsigned int, 805, 823, 503, 230, 825, 442, 1300, 1515, 890, 28, 52, 979>();
-    COPY_CONTAINER<float, unsigned int, 72, 233, 55, 34, 348, 544, 516, 936, 333, 591, 710, 346>();
-    COPY_CONTAINER<float, unsigned int, 736, 126, 482, 62, 353, 605, 1187, 375, 337, 332, 841, 448>();
-    COPY_CONTAINER<float, unsigned int, 700, 984, 337, 639, 886, 959, 1024, 1535, 49, 448, 832, 82>();
-    COPY_CONTAINER<double, unsigned int, 464, 46, 60, 30, 323, 576, 1302, 697, 1073, 102, 579, 495>();
-    COPY_CONTAINER<float, unsigned int, 274, 390, 146, 77, 161, 198, 1129, 863, 100, 470, 376, 369>();
-    COPY_CONTAINER<float, unsigned int, 106, 690, 5, 334, 960, 82, 1053, 1146, 170, 966, 728, 935>();
-    COPY_CONTAINER<double, unsigned int, 935, 474, 662, 35, 873, 798, 1559, 1232, 897, 999, 357, 563>();
-    COPY_CONTAINER<double, unsigned int, 669, 73, 45, 54, 959, 970, 809, 853, 210, 472, 846, 756>();
-    COPY_CONTAINER<double, unsigned int, 271, 343, 239, 160, 327, 82, 486, 1054, 41, 795, 34, 110>();
-    COPY_CONTAINER<double, unsigned int, 711, 20, 295, 10, 609, 133, 803, 705, 300, 262, 777, 276>();
-
+    COPY_CONTAINER<double, unsigned int, 889, 89, 205, 82, 866, 883, 1799, 671, 869, 508, 810, 202>();
+    COPY_CONTAINER<double, unsigned int, 629, 554, 259, 244, 78, 57, 928, 1377, 158, 312, 363, 883>();
+    COPY_CONTAINER<float, unsigned int, 857, 786, 790, 339, 266, 109, 1282, 1245, 93, 53, 431, 796>();
+    COPY_CONTAINER<double, unsigned int, 822, 335, 659, 169, 279, 138, 953, 1230, 89, 654, 319, 616>();
+    COPY_CONTAINER<double, unsigned int, 101, 561, 56, 344, 448, 865, 1089, 681, 661, 96, 836, 739>();
+    COPY_CONTAINER<float, unsigned int, 827, 700, 428, 375, 367, 360, 831, 1160, 1, 261, 257, 829>();
+    COPY_CONTAINER<float, unsigned int, 930, 73, 799, 23, 283, 388, 1904, 718, 886, 439, 477, 796>();
+    COPY_CONTAINER<float, unsigned int, 298, 404, 297, 65, 906, 878, 828, 1389, 237, 465, 69, 893>();
+    COPY_CONTAINER<double, unsigned int, 518, 235, 50, 145, 146, 997, 658, 1198, 118, 215, 687, 300>();
+    COPY_CONTAINER<double, unsigned int, 652, 160, 31, 121, 795, 332, 1466, 163, 506, 1, 767, 433>();
+    COPY_CONTAINER<double, unsigned int, 391, 673, 142, 288, 542, 190, 1077, 1337, 101, 141, 551, 492>();
+    COPY_CONTAINER<double, unsigned int, 552, 679, 439, 655, 725, 128, 1307, 839, 53, 20, 929, 121>();
+    COPY_CONTAINER<double, unsigned int, 374, 632, 27, 523, 799, 780, 651, 1448, 133, 356, 198, 832>();
+    COPY_CONTAINER<float, unsigned int, 382, 371, 203, 234, 614, 561, 598, 602, 140, 80, 202, 226>();
+    COPY_CONTAINER<double, unsigned int, 319, 926, 86, 29, 350, 678, 732, 1670, 350, 662, 765, 154>();
+    COPY_CONTAINER<float, unsigned int, 947, 585, 115, 147, 275, 328, 1782, 962, 157, 256, 147, 782>();
+    COPY_CONTAINER<double, unsigned int, 633, 460, 242, 302, 768, 134, 1155, 1056, 161, 236, 218, 969>();
+    COPY_CONTAINER<float, unsigned int, 907, 103, 659, 29, 327, 396, 1456, 601, 256, 279, 646, 396>();
+    COPY_CONTAINER<float, unsigned int, 725, 500, 77, 125, 204, 791, 1119, 1080, 159, 8, 224, 251>();
+    COPY_CONTAINER<float, unsigned int, 58, 576, 0, 537, 1, 223, 166, 655, 27, 7, 23, 166>();
+    COPY_CONTAINER<float, unsigned int, 112, 555, 1, 192, 764, 712, 470, 1354, 352, 592, 555, 589>();
+    COPY_CONTAINER<double, unsigned int, 926, 750, 59, 378, 530, 481, 1625, 1647, 71, 175, 327, 302>();
+    COPY_CONTAINER<float, unsigned int, 1000, 327, 310, 284, 472, 812, 1208, 686, 182, 287, 668, 28>();
+    COPY_CONTAINER<double, unsigned int, 60, 630, 34, 496, 679, 815, 417, 1200, 143, 416, 156, 330>();
+    COPY_CONTAINER<double, unsigned int, 949, 917, 446, 535, 940, 923, 1583, 1773, 301, 639, 630, 113>();
+    COPY_CONTAINER<double, unsigned int, 188, 241, 111, 150, 452, 296, 676, 842, 72, 56, 207, 145>();
+    COPY_CONTAINER<float, unsigned int, 712, 984, 394, 510, 281, 777, 1346, 1396, 236, 287, 269, 604>();
+    COPY_CONTAINER<double, unsigned int, 883, 480, 208, 154, 275, 905, 1174, 1249, 57, 341, 630, 483>();
+    COPY_CONTAINER<double, unsigned int, 633, 110, 550, 56, 799, 754, 1287, 406, 355, 144, 174, 214>();
+    COPY_CONTAINER<double, unsigned int, 972, 654, 232, 120, 846, 167, 1899, 1307, 292, 463, 100, 270>();
+    COPY_CONTAINER<float, unsigned int, 805, 242, 465, 135, 152, 833, 1764, 293, 811, 1, 217, 541>();
+    COPY_CONTAINER<double, unsigned int, 221, 467, 92, 115, 865, 827, 369, 926, 108, 74, 710, 847>();
+    COPY_CONTAINER<double, unsigned int, 845, 228, 245, 172, 616, 865, 1101, 258, 46, 22, 745, 617>();
+    COPY_CONTAINER<double, unsigned int, 863, 184, 317, 150, 397, 524, 1201, 936, 126, 420, 878, 599>();
+    COPY_CONTAINER<double, unsigned int, 786, 820, 408, 634, 22, 236, 1015, 1270, 217, 439, 122, 757>();
+    COPY_CONTAINER<double, unsigned int, 635, 761, 292, 435, 377, 111, 715, 804, 39, 18, 679, 671>();
+    COPY_CONTAINER<double, unsigned int, 417, 346, 102, 295, 359, 459, 1318, 451, 811, 84, 353, 309>();
+    COPY_CONTAINER<double, unsigned int, 599, 30, 109, 6, 386, 624, 898, 680, 132, 3, 243, 914>();
+    COPY_CONTAINER<double, unsigned int, 814, 201, 792, 20, 16, 492, 870, 360, 12, 25, 831, 807>();
+    COPY_CONTAINER<float, unsigned int, 472, 269, 221, 190, 546, 672, 959, 1121, 235, 35, 201, 172>();
+    COPY_CONTAINER<double, unsigned int, 754, 443, 21, 426, 131, 30, 1608, 837, 163, 361, 325, 783>();
+    COPY_CONTAINER<double, unsigned int, 698, 320, 66, 278, 571, 404, 903, 941, 20, 92, 189, 286>();
+    COPY_CONTAINER<double, unsigned int, 150, 415, 37, 101, 212, 665, 912, 525, 301, 98, 240, 332>();
+    COPY_CONTAINER<double, unsigned int, 684, 36, 170, 17, 324, 247, 729, 576, 24, 0, 316, 947>();
+    COPY_CONTAINER<double, unsigned int, 374, 76, 297, 38, 287, 407, 940, 458, 250, 100, 221, 595>();
+    COPY_CONTAINER<double, unsigned int, 732, 855, 178, 538, 783, 148, 1264, 1071, 33, 81, 726, 481>();
+    COPY_CONTAINER<double, unsigned int, 662, 556, 64, 426, 802, 636, 1292, 575, 594, 11, 152, 340>();
+    COPY_CONTAINER<float, unsigned int, 824, 137, 298, 26, 65, 478, 1724, 613, 20, 79, 530, 291>();
+    COPY_CONTAINER<float, unsigned int, 343, 788, 297, 413, 764, 630, 607, 1429, 190, 606, 408, 298>();
+    COPY_CONTAINER<double, unsigned int, 759, 327, 312, 88, 485, 499, 1161, 692, 142, 97, 492, 507>();
 }
 
 
@@ -207,7 +200,9 @@ TEST(RL_TOOLS_NN_CUDA, COPYING_VIEWS){
     DEVICE_CPU device_cpu;
     using DTYPE = float;
     {
-        auto rng = rlt::random::default_engine(decltype(device_cpu)::SPEC::RANDOM());
+
+        DEVICE_CPU::SPEC::RANDOM::ENGINE<> rng;
+        rlt::init(device_cpu, rng);
         rlt::Matrix<rlt::matrix::Specification<DTYPE, DEVICE_CPU::index_t, 100, 100>> matrix_cpu_data;
         rlt::Matrix<rlt::matrix::Specification<DTYPE, DEVICE_CPU::index_t, 100, 100>> matrix_cpu_data_2;
         rlt::Matrix<rlt::matrix::Specification<DTYPE, DEVICE_CPU::index_t, 100, 100>> matrix_cpu_data_3;
@@ -274,16 +269,16 @@ TEST(RL_TOOLS_NN_CUDA, COPYING_VIEWS){
         rlt::free(device_cuda, matrix_cuda_data);
     }
 }
-template <typename T, typename TI>
+template <typename TYPE_POLICY, typename TI>
 struct copy{
     static constexpr TI BATCH_SIZE = 100;
     static constexpr TI HIDDEN_DIM = BATCH_SIZE;
 
     template <rlt::nn::activation_functions::ActivationFunction ACTIVATION_FUNCTION>
-    using CONFIGURATION = rlt::nn_models::mlp::Configuration<T, TI, HIDDEN_DIM, 3, HIDDEN_DIM, ACTIVATION_FUNCTION, ACTIVATION_FUNCTION>;
+    using CONFIGURATION = rlt::nn_models::mlp::Configuration<TYPE_POLICY, TI, HIDDEN_DIM, 3, HIDDEN_DIM, ACTIVATION_FUNCTION, ACTIVATION_FUNCTION>;
 
-    using OPTIMIZER_PARAMETERS = rlt::nn::optimizers::adam::DEFAULT_PARAMETERS_PYTORCH<T>;
-    using OPTIMIZER = rlt::nn::optimizers::Adam<rlt::nn::optimizers::adam::Specification<T, TI, OPTIMIZER_PARAMETERS>>;
+    using OPTIMIZER_PARAMETERS = rlt::nn::optimizers::adam::DEFAULT_PARAMETERS_PYTORCH<TYPE_POLICY>;
+    using OPTIMIZER = rlt::nn::optimizers::Adam<rlt::nn::optimizers::adam::Specification<TYPE_POLICY, TI, OPTIMIZER_PARAMETERS>>;
     template <rlt::nn::activation_functions::ActivationFunction ACTIVATION_FUNCTION>
     using NN = rlt::nn_models::mlp::NeuralNetwork<CONFIGURATION<ACTIVATION_FUNCTION>, rlt::nn::capability::Gradient<rlt::nn::parameters::Adam>, rlt::tensor::Shape<TI, 1, BATCH_SIZE, HIDDEN_DIM>>;
 
@@ -296,14 +291,14 @@ TEST(RL_TOOLS_NN_CUDA, COPY) {
     using DEVICE_CPU = rlt::devices::DefaultCPU;
     using DEVICE_CUDA = rlt::devices::DefaultCUDA;
     using T = float;
+    using TYPE_POLICY = rlt::numeric_types::Policy<T>;
     using TI_CPU = typename DEVICE_CPU::index_t;
     using TI_CUDA = typename DEVICE_CUDA::index_t;
-    using COPY_CPU = copy<T, TI_CPU>;
-    using COPY_CUDA = copy<T, TI_CUDA>;
+    using COPY_CPU = copy<TYPE_POLICY, TI_CPU>;
+    using COPY_CUDA = copy<TYPE_POLICY, TI_CUDA>;
     using NetworkTypeCPU = COPY_CPU::NN<rlt::nn::activation_functions::RELU>;
     using NetworkTypeCUDA = COPY_CUDA::NN<rlt::nn::activation_functions::RELU>;
     COPY_CPU::OPTIMIZER optimizer_cpu;
-    COPY_CUDA::OPTIMIZER optimizer_cuda;
     DEVICE_CPU device_cpu;
     DEVICE_CUDA device_cuda;
     NetworkTypeCPU network_cpu;
@@ -313,13 +308,16 @@ TEST(RL_TOOLS_NN_CUDA, COPY) {
     rlt::malloc(device_cpu, network_cpu);
     rlt::malloc(device_cpu, network_cpu_2);
     rlt::malloc(device_cuda, network_cuda);
+    rlt::malloc(device_cpu, optimizer_cpu);
 
-    auto rng = rlt::random::default_engine(DEVICE_CPU::SPEC::RANDOM());
+    DEVICE_CPU::SPEC::RANDOM::ENGINE<> rng;
+    rlt::init(device_cpu, rng);
 
     rlt::init_weights(device_cpu, network_cpu, rng);
     rlt::init_weights(device_cpu, network_cpu_2, rng);
     rlt::zero_gradient(device_cpu, network_cpu);
     rlt::zero_gradient(device_cpu, network_cpu_2);
+    rlt::init(device_cpu, optimizer_cpu);
     rlt::reset_optimizer_state(device_cpu, optimizer_cpu, network_cpu);
     rlt::reset_optimizer_state(device_cpu, optimizer_cpu, network_cpu_2);
     rlt::reset_forward_state(device_cpu, network_cpu);
@@ -334,7 +332,7 @@ TEST(RL_TOOLS_NN_CUDA, COPY) {
     std::cout << "CPU network round-trip: " << cpu_network_diff_round_trip << std::endl;
     ASSERT_FLOAT_EQ(cpu_network_diff_round_trip, 0);
 
-    increment(network_cpu.hidden_layers[0].weights.parameters, 0, 50, 5);
+    increment(device_cpu, network_cpu.hidden_layers[0].weights.parameters, 5, 0, 50);
 
     cpu_network_diff = rlt::abs_diff(device_cpu, network_cpu, network_cpu_2);
     std::cout << "CPU network diff: " << cpu_network_diff << std::endl;
@@ -349,21 +347,23 @@ TEST(RL_TOOLS_NN_CUDA, COPY) {
     rlt::free(device_cpu, network_cpu);
     rlt::free(device_cpu, network_cpu_2);
     rlt::free(device_cuda, network_cuda);
+    rlt::check_status(device_cuda);
 }
 
-template <typename T, typename TI, TI BATCH_SIZE, TI ITERATIONS>
+template <typename TYPE_POLICY, typename TI, TI BATCH_SIZE, TI ITERATIONS>
 void GEMM() {
+    using T = typename TYPE_POLICY::DEFAULT;
     using DEVICE_CPU = rlt::devices::DefaultCPU;
     using DEVICE_CUDA = rlt::devices::DefaultCUDA;
 
     constexpr DEVICE_CPU::index_t HIDDEN_DIM = BATCH_SIZE;
 
     constexpr auto ACTIVATION_FUNCTION = rlt::nn::activation_functions::IDENTITY;
-    using CONFIG = rlt::nn_models::mlp::Configuration<T, TI, HIDDEN_DIM, 3, HIDDEN_DIM, ACTIVATION_FUNCTION, rlt::nn::activation_functions::RELU>;
+    using CONFIG = rlt::nn_models::mlp::Configuration<TYPE_POLICY, TI, HIDDEN_DIM, 3, HIDDEN_DIM, ACTIVATION_FUNCTION, rlt::nn::activation_functions::RELU>;
 
     using INPUT_SHAPE = rlt::tensor::Shape<TI, 1, BATCH_SIZE, HIDDEN_DIM>;
-    using OPTIMIZER_PARAMETERS = rlt::nn::optimizers::adam::DEFAULT_PARAMETERS_PYTORCH<T>;
-    using OPTIMIZER = rlt::nn::optimizers::Adam<rlt::nn::optimizers::adam::Specification<T, TI, OPTIMIZER_PARAMETERS>>;
+    using OPTIMIZER_PARAMETERS = rlt::nn::optimizers::adam::DEFAULT_PARAMETERS_PYTORCH<TYPE_POLICY>;
+    using OPTIMIZER = rlt::nn::optimizers::Adam<rlt::nn::optimizers::adam::Specification<TYPE_POLICY, TI, OPTIMIZER_PARAMETERS>>;
 
     std::cout << "GEMM<" << (rlt::utils::typing::is_same_v<T, float> ? "float" : "double") << ", " << BATCH_SIZE << ">" << std::endl;
     using CAPABILITY = rlt::nn::capability::Gradient<rlt::nn::parameters::Adam>;
@@ -372,6 +372,7 @@ void GEMM() {
     DEVICE_CPU device_cpu;
     DEVICE_CUDA device_cuda;
     rlt::init(device_cuda);
+    rlt::check_status(device_cuda);
     NetworkTypeCPU network_cpu;
     typename NetworkTypeCPU::template Buffer<> network_cpu_buffers;
     NetworkTypeCUDA network_cuda;
@@ -379,13 +380,23 @@ void GEMM() {
     OPTIMIZER optimizer;
     rlt::malloc(device_cpu, network_cpu);
     rlt::malloc(device_cpu, network_cpu_buffers);
+    rlt::check_status(device_cuda);
     rlt::malloc(device_cuda, network_cuda);
+    rlt::check_status(device_cuda);
     rlt::malloc(device_cuda, network_cuda_buffers);
+    rlt::check_status(device_cuda);
+    rlt::malloc(device_cpu, optimizer);
+    rlt::check_status(device_cuda);
 
-    auto rng = rlt::random::default_engine(DEVICE_CPU::SPEC::RANDOM());
-    auto rng_cuda = rlt::random::default_engine(DEVICE_CUDA::SPEC::RANDOM{});
+    DEVICE_CPU::SPEC::RANDOM::ENGINE<> rng;
+    rlt::init(device_cpu, rng);
+    DEVICE_CUDA::SPEC::RANDOM::ENGINE<> rng_cuda;
+    rlt::malloc(device_cuda, rng_cuda);
+    rlt::init(device_cuda, rng_cuda);
+    rlt::check_status(device_cuda);
 
     rlt::init_weights(device_cpu, network_cpu, rng);
+    rlt::init(device_cpu, optimizer);
     rlt::reset_optimizer_state(device_cpu, optimizer, network_cpu);
     rlt::copy(device_cpu, device_cuda, network_cpu, network_cuda);
 
@@ -397,36 +408,6 @@ void GEMM() {
     rlt::malloc(device_cpu, output_first_layer_cuda_cpu);
 
     rlt::randn(device_cpu, input_cpu, rng);
-//    if(BATCH_SIZE <= 10 && NetworkTypeCPU::INPUT_DIM <= 10){
-//        std::cout << "Input:" << std::endl;
-//        for(typename NetworkTypeCPU::TI i = 0; i < BATCH_SIZE; ++i)
-//        {
-//            for(typename NetworkTypeCPU::TI j = 0; j < NetworkTypeCPU::INPUT_DIM; ++j)
-//            {
-//                std::cout << input_cpu.data[i * NetworkTypeCPU::INPUT_DIM + j] << " ";
-//            }
-//            std::cout << std::endl;
-//        }
-//    }
-//    if(BATCH_SIZE <= 10 && NetworkTypeCPU::INPUT_DIM <= 10){
-//        std::cout << "Weights:" << std::endl;
-//        for(typename NetworkTypeCPU::TI i = 0; i < NetworkTypeCPU::SPEC::STRUCTURE_SPEC::HIDDEN_DIM; ++i)
-//        {
-//            for(typename NetworkTypeCPU::TI j = 0; j < NetworkTypeCPU::INPUT_DIM; ++j)
-//            {
-//                std::cout << network_cpu.input_layer.weights.data[i * NetworkTypeCPU::INPUT_DIM + j] << " ";
-//            }
-//            std::cout << std::endl;
-//        }
-//    }
-//    if(BATCH_SIZE <= 10 && NetworkTypeCPU::INPUT_DIM <= 10){
-//        std::cout << "Biases:" << std::endl;
-//        for(typename NetworkTypeCPU::TI i = 0; i < NetworkTypeCPU::SPEC::STRUCTURE_SPEC::HIDDEN_DIM; ++i)
-//        {
-//            std::cout << network_cpu.input_layer.biases.data[i] << " ";
-//        }
-//        std::cout << std::endl;
-//    }
 
 
     rlt::Matrix<rlt::matrix::Specification<T, DEVICE_CUDA::index_t, BATCH_SIZE, HIDDEN_DIM>> input_cuda;
@@ -445,41 +426,6 @@ void GEMM() {
     rlt::copy(device_cuda, device_cpu, output_first_layer_cuda, output_first_layer_cuda_cpu);
     auto evaluation_diff = rlt::abs_diff(device_cpu, output_first_layer_cuda_cpu, output_first_layer_cpu)/(BATCH_SIZE * NetworkTypeCPU::SPEC::CONFIG::HIDDEN_DIM);
 
-//    if(BATCH_SIZE <= 10 && NetworkTypeCPU::SPEC::STRUCTURE_SPEC::HIDDEN_DIM <= 10){
-//        std::cout << "cpu output:" << std::endl;
-//        for(typename NetworkTypeCPU::TI i = 0; i < BATCH_SIZE; ++i)
-//        {
-//            for(typename NetworkTypeCPU::TI j = 0; j < NetworkTypeCPU::SPEC::STRUCTURE_SPEC::HIDDEN_DIM; ++j)
-//            {
-//                std::cout << output_first_layer_cpu.data[i * NetworkTypeCPU::SPEC::STRUCTURE_SPEC::HIDDEN_DIM + j] << " ";
-//            }
-//            std::cout << std::endl;
-//        }
-//    }
-//
-//    if(BATCH_SIZE <= 10 && NetworkTypeCPU::SPEC::STRUCTURE_SPEC::HIDDEN_DIM <= 10){
-//        std::cout << "cuda output:" << std::endl;
-//        for(typename NetworkTypeCPU::TI i = 0; i < BATCH_SIZE; ++i){
-//            for(typename NetworkTypeCPU::TI j = 0; j < NetworkTypeCPU::SPEC::STRUCTURE_SPEC::HIDDEN_DIM; ++j){
-//                std::cout << output_first_layer_cuda_cpu.data[i * NetworkTypeCPU::SPEC::STRUCTURE_SPEC::HIDDEN_DIM + j] << " ";
-//            }
-//            std::cout << std::endl;
-//        }
-//    }
-//
-//    if(BATCH_SIZE <= 10 && NetworkTypeCPU::SPEC::STRUCTURE_SPEC::HIDDEN_DIM <= 10){
-//        std::cout << "cuda diff:" << std::endl;
-//        for(typename NetworkTypeCPU::TI i = 0; i < BATCH_SIZE; ++i)
-//        {
-//            for(typename NetworkTypeCPU::TI j = 0; j < NetworkTypeCPU::SPEC::STRUCTURE_SPEC::HIDDEN_DIM; ++j)
-//            {
-//                T diff = output_first_layer_cpu.data[i * NetworkTypeCPU::SPEC::STRUCTURE_SPEC::HIDDEN_DIM + j] - output_first_layer_cuda_cpu.data[i * NetworkTypeCPU::SPEC::STRUCTURE_SPEC::HIDDEN_DIM + j];
-//                diff = std::abs(diff) > 1e-7 ? diff : 0;
-//                std::cout << diff << " ";
-//            }
-//            std::cout << std::endl;
-//        }
-//    }
 
     std::cout << "Evaluation diff: " << evaluation_diff << std::endl;
     auto threshold = (rlt::utils::typing::is_same_v<T, float> ? 1e-6 : 1e-15);
@@ -500,30 +446,33 @@ void GEMM() {
     }
 }
 TEST(RL_TOOLS_NN_CUDA, GEMM) {
-    using DEFAULT_DTYPE = float;
+    using DEFAULT_DTYPE = rlt::numeric_types::Policy<float>;
     GEMM<DEFAULT_DTYPE, unsigned int, 1, 1>();
     GEMM<DEFAULT_DTYPE, unsigned int, 2, 1>();
     GEMM<DEFAULT_DTYPE, unsigned int, 32, 1>();
+#ifndef RL_TOOLS_DEBUG
     GEMM<DEFAULT_DTYPE, unsigned int, 1024, 1>();
+#endif
     GEMM<DEFAULT_DTYPE, unsigned int, 10, 1>();
     GEMM<DEFAULT_DTYPE, unsigned int, 9, 1>();
-    GEMM<double, unsigned int, 200, 1>();
+    GEMM<rlt::numeric_types::Policy<double>, unsigned int, 200, 1>();
     GEMM<DEFAULT_DTYPE, unsigned int, 200, 1>();
     GEMM<DEFAULT_DTYPE, unsigned int, 64, 1000>();
     GEMM<DEFAULT_DTYPE, unsigned int, 256, 1000>();
 }
 
-template <typename T, typename TI, TI BATCH_SIZE, TI ITERATIONS>
+template <typename TYPE_POLICY, typename TI, TI BATCH_SIZE, TI ITERATIONS>
 void FORWARD() {
+    using T = typename TYPE_POLICY::DEFAULT;
     using DEVICE_CPU = rlt::devices::DefaultCPU;
     using DEVICE_CUDA = rlt::devices::DefaultCUDA;
 
     constexpr DEVICE_CPU::index_t HIDDEN_DIM = BATCH_SIZE;
 
     constexpr auto ACTIVATION_FUNCTION = rlt::nn::activation_functions::IDENTITY;
-    using CONFIG = rlt::nn_models::mlp::Configuration<T, TI, HIDDEN_DIM, 3, HIDDEN_DIM, ACTIVATION_FUNCTION, rlt::nn::activation_functions::RELU>;
+    using CONFIG = rlt::nn_models::mlp::Configuration<TYPE_POLICY, TI, HIDDEN_DIM, 3, HIDDEN_DIM, ACTIVATION_FUNCTION, rlt::nn::activation_functions::RELU>;
 
-    using OPTIMIZER_SPEC = rlt::nn::optimizers::adam::Specification<T, typename DEVICE_CUDA::index_t>;
+    using OPTIMIZER_SPEC = rlt::nn::optimizers::adam::Specification<TYPE_POLICY, typename DEVICE_CUDA::index_t>;
     using OPTIMIZER = rlt::nn::optimizers::Adam<OPTIMIZER_SPEC>;
 
     std::cout << "FORWARD<" << (rlt::utils::typing::is_same_v<T, float> ? "float" : "double") << ", " << BATCH_SIZE << ">" << std::endl;
@@ -543,8 +492,11 @@ void FORWARD() {
     rlt::malloc(device_cuda, network_cuda);
     rlt::malloc(device_cuda, network_cuda_buffers);
 
-    auto rng = rlt::random::default_engine(DEVICE_CPU::SPEC::RANDOM());
-    auto rng_cuda = rlt::random::default_engine(DEVICE_CUDA::SPEC::RANDOM{});
+    DEVICE_CPU::SPEC::RANDOM::ENGINE<> rng;
+    rlt::init(device_cpu, rng);
+    DEVICE_CUDA::SPEC::RANDOM::ENGINE<> rng_cuda;
+    rlt::malloc(device_cuda, rng_cuda);
+    rlt::init(device_cuda, rng_cuda);
 
 
     rlt::init_weights(device_cpu, network_cpu, rng);
@@ -660,28 +612,31 @@ void FORWARD() {
 }
 
 TEST(RL_TOOLS_NN_CUDA, FORWARD) {
-    FORWARD<float, unsigned int, 1, 1>();
-    FORWARD<float, unsigned int, 2, 1>();
-    FORWARD<float, unsigned int, 32, 1>();
-    FORWARD<float, unsigned int, 1024, 1>();
-    FORWARD<float, unsigned int, 10, 1>();
-    FORWARD<float, unsigned int, 9, 1>();
-    FORWARD<double, unsigned int, 200, 1>();
-    FORWARD<float, unsigned int, 200, 1>();
-    FORWARD<float, unsigned int, 64, 10000>();
-    FORWARD<float, unsigned int, 256, 100000>();
+    FORWARD<rlt::numeric_types::Policy<float>, unsigned int, 1, 1>();
+    FORWARD<rlt::numeric_types::Policy<float>, unsigned int, 2, 1>();
+    FORWARD<rlt::numeric_types::Policy<float>, unsigned int, 32, 1>();
+#ifndef RL_TOOLS_DEBUG
+    FORWARD<rlt::numeric_types::Policy<float>, unsigned int, 1024, 1>();
+#endif
+    FORWARD<rlt::numeric_types::Policy<float>, unsigned int, 10, 1>();
+    FORWARD<rlt::numeric_types::Policy<float>, unsigned int, 9, 1>();
+    FORWARD<rlt::numeric_types::Policy<double>, unsigned int, 200, 1>();
+    FORWARD<rlt::numeric_types::Policy<float>, unsigned int, 200, 1>();
+    FORWARD<rlt::numeric_types::Policy<float>, unsigned int, 64, 1000>();
+    FORWARD<rlt::numeric_types::Policy<float>, unsigned int, 256, 100>();
 }
 
-template <typename T, typename TI, TI BATCH_SIZE, TI INPUT_DIM, TI HIDDEN_DIM, TI OUTPUT_DIM, TI ITERATIONS>
+template <typename TYPE_POLICY, typename TI, TI BATCH_SIZE, TI INPUT_DIM, TI HIDDEN_DIM, TI OUTPUT_DIM, TI ITERATIONS>
 void BACKWARD() {
+    using T = typename TYPE_POLICY::DEFAULT;
     using DEVICE_CPU = rlt::devices::DefaultCPU;
     using DEVICE_CUDA = rlt::devices::DefaultCUDA;
 
     constexpr auto ACTIVATION_FUNCTION = rlt::nn::activation_functions::IDENTITY;
-    using CONFIG = rlt::nn_models::mlp::Configuration<T, TI, OUTPUT_DIM, 3, HIDDEN_DIM, rlt::nn::activation_functions::RELU, ACTIVATION_FUNCTION>;
+    using CONFIG = rlt::nn_models::mlp::Configuration<TYPE_POLICY, TI, OUTPUT_DIM, 3, HIDDEN_DIM, rlt::nn::activation_functions::RELU, ACTIVATION_FUNCTION>;
 
-    using OPTIMIZER_PARAMETERS = rlt::nn::optimizers::adam::DEFAULT_PARAMETERS_PYTORCH<T>;
-    using OPTIMIZER = rlt::nn::optimizers::Adam<rlt::nn::optimizers::adam::Specification<T, TI, OPTIMIZER_PARAMETERS>>;
+    using OPTIMIZER_PARAMETERS = rlt::nn::optimizers::adam::DEFAULT_PARAMETERS_PYTORCH<TYPE_POLICY>;
+    using OPTIMIZER = rlt::nn::optimizers::Adam<rlt::nn::optimizers::adam::Specification<TYPE_POLICY, TI, OPTIMIZER_PARAMETERS>>;
 
     std::cout << "BACKWARD<" << (rlt::utils::typing::is_same_v<T, float> ? "float" : "double") << ", " << BATCH_SIZE << ">" << std::endl;
     using INPUT_SHAPE = rlt::tensor::Shape<TI, 1, BATCH_SIZE, INPUT_DIM>;
@@ -714,12 +669,18 @@ void BACKWARD() {
     rlt::malloc(device_cpu, network_cpu_buffers);
     rlt::malloc(device_cuda, network_cuda);
     rlt::malloc(device_cuda, network_cuda_buffers);
+    rlt::malloc(device_cpu, optimizer_cpu);
+    rlt::malloc(device_cuda, optimizer_cuda);
 
-    auto rng = rlt::random::default_engine(DEVICE_CPU::SPEC::RANDOM());
-    auto rng_cuda = rlt::random::default_engine(DEVICE_CUDA::SPEC::RANDOM{});
+    DEVICE_CPU::SPEC::RANDOM::ENGINE<> rng;
+    rlt::init(device_cpu, rng);
+    DEVICE_CUDA::SPEC::RANDOM::ENGINE<> rng_cuda;
+    rlt::malloc(device_cuda, rng_cuda);
+    rlt::init(device_cuda, rng_cuda);
 
     rlt::init_weights(device_cpu, network_cpu, rng);
     rlt::zero_gradient(device_cpu, network_cpu);
+    rlt::init(device_cpu, optimizer_cpu);
     rlt::reset_optimizer_state(device_cpu, optimizer_cpu, network_cpu);
     rlt::copy(device_cpu, device_cpu, network_cpu, network_cpu_pre);
 
@@ -789,6 +750,8 @@ void BACKWARD() {
     }
     {
 
+        rlt::init(device_cpu, optimizer_cpu);
+        rlt::init(device_cuda, optimizer_cuda);
         rlt::reset_optimizer_state(device_cpu, optimizer_cpu, network_cpu);
         rlt::reset_optimizer_state(device_cuda, optimizer_cuda, network_cuda);
         rlt::zero_gradient(device_cpu, network_cpu);
@@ -849,7 +812,7 @@ void BACKWARD() {
 }
 
 TEST(RL_TOOLS_NN_CUDA, BACKWARD) {
-    using DEFAULT_DTYPE = float;
+    using DEFAULT_DTYPE = rlt::numeric_types::Policy<float>;
     BACKWARD<DEFAULT_DTYPE, unsigned int,    1, 1, 1, 1, 1>();
     BACKWARD<DEFAULT_DTYPE, unsigned int,    1, 256,  10, 100, 1>();
     BACKWARD<DEFAULT_DTYPE, unsigned int,    2, 256,  10, 100, 1>();
@@ -858,20 +821,21 @@ TEST(RL_TOOLS_NN_CUDA, BACKWARD) {
     BACKWARD<DEFAULT_DTYPE, unsigned int,   10, 256, 200, 100, 1>();
     BACKWARD<DEFAULT_DTYPE, unsigned int,    9, 256,  60, 100, 1>();
     BACKWARD<DEFAULT_DTYPE, unsigned int,  200, 256,  11, 100, 1>();
-    BACKWARD<double       , unsigned int,  200, 256,  12, 101, 1>();
+    BACKWARD<rlt::numeric_types::Policy<double>, unsigned int,  200, 256,  12, 101, 1>();
     BACKWARD<DEFAULT_DTYPE, unsigned int,   64, 256,  50, 101, 1>();
-    BACKWARD<DEFAULT_DTYPE, unsigned int,  256, 256, 256, 256, 10000>();
+    BACKWARD<DEFAULT_DTYPE, unsigned int,  256, 256, 256, 256, 100>();
 }
 
-template <typename T, typename TI, TI BATCH_SIZE, TI INPUT_DIM, TI HIDDEN_DIM, TI OUTPUT_DIM, TI ITERATIONS>
+template <typename TYPE_POLICY, typename TI, TI BATCH_SIZE, TI INPUT_DIM, TI HIDDEN_DIM, TI OUTPUT_DIM, TI ITERATIONS>
 void ADAM_UPDATE() {
+    using T = typename TYPE_POLICY::DEFAULT;
     using DEVICE_CPU = rlt::devices::DefaultCPU;
     using DEVICE_CUDA = rlt::devices::DefaultCUDA;
 
     constexpr auto ACTIVATION_FUNCTION = rlt::nn::activation_functions::IDENTITY;
-    using CONFIG = rlt::nn_models::mlp::Configuration<T, TI, OUTPUT_DIM, 3, HIDDEN_DIM, rlt::nn::activation_functions::RELU, ACTIVATION_FUNCTION>;
+    using CONFIG = rlt::nn_models::mlp::Configuration<TYPE_POLICY, TI, OUTPUT_DIM, 3, HIDDEN_DIM, rlt::nn::activation_functions::RELU, ACTIVATION_FUNCTION>;
 
-    using OPTIMIZER_SPEC = rlt::nn::optimizers::adam::Specification<T, TI>;
+    using OPTIMIZER_SPEC = rlt::nn::optimizers::adam::Specification<TYPE_POLICY, TI>;
     using OPTIMIZER = rlt::nn::optimizers::Adam<OPTIMIZER_SPEC>;
 
     std::cout << "BACKWARD<" << (rlt::utils::typing::is_same_v<T, float> ? "float" : "double") << ", " << BATCH_SIZE << ">" << std::endl;
@@ -895,13 +859,21 @@ void ADAM_UPDATE() {
     rlt::malloc(device_cpu, network_cpu_buffers);
     rlt::malloc(device_cuda, network_cuda);
     rlt::malloc(device_cuda, network_cuda_buffers);
+    rlt::malloc(device_cpu, optimizer_cpu);
+    rlt::malloc(device_cuda, optimizer_cuda);
 
-    auto rng = rlt::random::default_engine(DEVICE_CPU::SPEC::RANDOM());
-    auto rng_cuda = rlt::random::default_engine(DEVICE_CUDA::SPEC::RANDOM{});
+    DEVICE_CPU::SPEC::RANDOM::ENGINE<> rng;
+    rlt::init(device_cpu, rng);
+    DEVICE_CUDA::SPEC::RANDOM::ENGINE<> rng_cuda;
+    rlt::malloc(device_cuda, rng_cuda);
+    rlt::init(device_cuda, rng_cuda);
+    rlt::init(device_cpu, optimizer_cpu);
+    rlt::init(device_cuda, optimizer_cuda);
 
     rlt::init_weights(device_cpu, network_cpu, rng);
     rlt::zero_gradient(device_cpu, network_cpu);
     rlt::reset_optimizer_state(device_cpu, optimizer_cpu, network_cpu);
+    rlt::reset_optimizer_state(device_cuda, optimizer_cuda, network_cuda);
     rlt::copy(device_cpu, device_cpu, network_cpu, network_cpu_pre);
 
     rlt::Matrix<rlt::matrix::Specification<T, DEVICE_CPU::index_t, BATCH_SIZE, INPUT_DIM>> input_cpu;
@@ -939,7 +911,7 @@ void ADAM_UPDATE() {
 
     rlt::zero_gradient(device_cpu, network_cpu);
     rlt::zero_gradient(device_cuda, network_cuda);
-    rlt::reset_optimizer_state(device_cpu, optimizer_cuda, network_cpu);
+    rlt::reset_optimizer_state(device_cpu, optimizer_cpu, network_cpu);
     rlt::reset_optimizer_state(device_cuda, optimizer_cuda, network_cuda);
 //    rlt::forward_backward_mse(device_cpu, network_cpu, input_cpu, output_target_cpu, network_cpu_buffers);
     {
@@ -987,7 +959,7 @@ void ADAM_UPDATE() {
 }
 
 TEST(RL_TOOLS_NN_CUDA, ADAM_UPDATE) {
-    using DEFAULT_DTYPE = float;
+    using DEFAULT_DTYPE = rlt::numeric_types::Policy<float>;
     ADAM_UPDATE<DEFAULT_DTYPE, unsigned int,    1, 256,  10, 100, 1>();
     ADAM_UPDATE<DEFAULT_DTYPE, unsigned int,    2, 256,  10, 100, 1>();
     ADAM_UPDATE<DEFAULT_DTYPE, unsigned int,   32, 256,  10, 100, 1>();
@@ -995,7 +967,7 @@ TEST(RL_TOOLS_NN_CUDA, ADAM_UPDATE) {
     ADAM_UPDATE<DEFAULT_DTYPE, unsigned int,   10, 256, 200, 100, 1>();
     ADAM_UPDATE<DEFAULT_DTYPE, unsigned int,    9, 256,  60, 100, 1>();
     ADAM_UPDATE<DEFAULT_DTYPE, unsigned int,  200, 256,  11, 100, 1>();
-    ADAM_UPDATE<double       , unsigned int,  200, 256,  12, 101, 1>();
-    ADAM_UPDATE<DEFAULT_DTYPE, unsigned int,   64, 256,  50, 101, 10000>();
-    ADAM_UPDATE<DEFAULT_DTYPE, unsigned int,  256, 256, 256, 256, 10000>();
+    ADAM_UPDATE<rlt::numeric_types::Policy<double>, unsigned int,  200, 256,  12, 101, 1>();
+    ADAM_UPDATE<DEFAULT_DTYPE, unsigned int,   64, 256,  50, 101, 100>();
+    ADAM_UPDATE<DEFAULT_DTYPE, unsigned int,  256, 256, 256, 256, 100>();
 }

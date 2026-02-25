@@ -1,14 +1,11 @@
 # PPO tests
 if(RL_TOOLS_ENABLE_TENSORBOARD)
-    add_executable(
-            test_rl_algorithms_ppo
-            ppo.cpp
-    )
-    target_link_libraries(
-            test_rl_algorithms_ppo
-            PRIVATE
-            rl_tools
-            rl_tools_test
-    )
+    add_executable(test_rl_algorithms_ppo ppo.cpp)
+    target_link_libraries(test_rl_algorithms_ppo PRIVATE RLtools::RLtools GTest::gtest_main)
     gtest_discover_tests(test_rl_algorithms_ppo)
+endif()
+if(RL_TOOLS_ENABLE_HDF5)
+    add_executable(test_rl_algorithms_ppo_loop_persist ppo_loop_persist.cpp)
+    target_link_libraries(test_rl_algorithms_ppo_loop_persist PRIVATE RLtools::RLtools GTest::gtest_main)
+    gtest_discover_tests(test_rl_algorithms_ppo_loop_persist)
 endif()

@@ -7,7 +7,7 @@ RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools::rl::components::off_policy_runner{
     template<typename DEVICE, typename SPEC, typename RNG>
     RL_TOOLS_FUNCTION_PLACEMENT void prologue_per_env(DEVICE& device, rl::components::OffPolicyRunner<SPEC>& runner, RNG &rng, typename DEVICE::index_t env_i) {
-        using T = typename SPEC::T;
+        using T = typename SPEC::TYPE_POLICY::DEFAULT;
         using TI = typename SPEC::TI;
         // if the episode is done (step limit activated for STEP_LIMIT > 0) or if the step is the first step for this runner, reset the environment
         using RUNNER = rl::components::OffPolicyRunner<SPEC>;
@@ -17,6 +17,14 @@ namespace rl_tools::rl::components::off_policy_runner{
         auto& parameters = get(runner.env_parameters, 0, env_i);
         static_assert(!SPEC::PARAMETERS::COLLECT_EPISODE_STATS || SPEC::PARAMETERS::EPISODE_STATS_BUFFER_SIZE > 1);
         if (get(runner.truncated, 0, env_i)){
+            T episode_return = get(runner.episode_return, 0, env_i);
+#ifdef __CUDA_ARCH__
+            printf("GPU: Episode return: %f\n", episode_return);
+#else
+            // std::cout << "CPU: Episode return: " << episode_return << std::endl;
+            add_scalar(device, device.logger, "off_policy_runner/episode_return", get(runner.episode_return, 0, env_i));
+            add_scalar(device, device.logger, "off_policy_runner/episode_step", get(runner.episode_step, 0, env_i));
+#endif
             if constexpr(SPEC::PARAMETERS::COLLECT_EPISODE_STATS){
                 // todo: the first episode is always zero steps and zero return because the initialization is done by setting truncated to true
                 auto& episode_stats = get(runner.episode_stats, 0, env_i);
@@ -39,6 +47,15 @@ namespace rl_tools::rl::components::off_policy_runner{
             sample_initial_state(device, env, parameters, state, rng);
             set(runner.episode_step, 0, env_i, 0);
             set(runner.episode_return, 0, env_i, 0);
+            auto& replay_buffer = get(runner.replay_buffers, 0, env_i);
+            if (replay_buffer.full || replay_buffer.position > 0){
+                TI previous_position = replay_buffer.position - 1;
+                if (replay_buffer.position == 0){
+                    previous_position = SPEC::PARAMETERS::REPLAY_BUFFER_CAPACITY - 1;
+                }
+                set(replay_buffer.truncated, previous_position, 0, true);
+                replay_buffer.current_episode_start = replay_buffer.position;
+            }
         }
         auto observation            = view<DEVICE, typename decltype(runner.buffers.observations           )::SPEC, 1, ENVIRONMENT::Observation::DIM           >(device, runner.buffers.observations           , env_i, 0);
         auto observation_privileged = view<DEVICE, typename decltype(runner.buffers.observations_privileged)::SPEC, 1, SPEC::OBSERVATION_DIM_PRIVILEGED>(device, runner.buffers.observations_privileged, env_i, 0);
@@ -49,7 +66,7 @@ namespace rl_tools::rl::components::off_policy_runner{
     }
     template<typename DEVICE, typename SPEC, typename POLICY, typename RNG>
     RL_TOOLS_FUNCTION_PLACEMENT void epilogue_per_env(DEVICE& device, rl::components::OffPolicyRunner<SPEC>& runner, const POLICY& policy, RNG &rng, typename DEVICE::index_t env_i) {
-        using T = typename SPEC::T;
+        using T = typename SPEC::TYPE_POLICY::DEFAULT;
         using TI = typename SPEC::TI;
         using ENVIRONMENT = typename SPEC::ENVIRONMENT;
         auto observation                 = view<DEVICE, typename decltype(runner.buffers.observations           )::SPEC, 1, ENVIRONMENT::Observation::DIM           >(device, runner.buffers.observations           , env_i, 0);
@@ -67,7 +84,10 @@ namespace rl_tools::rl::components::off_policy_runner{
         step(device, env, parameters, state, action, next_state, rng);
 
         T reward_value = reward(device, env, parameters, state, action, next_state, rng);
-        // log_reward(device, env, parameters, state, action, next_state, rng, 331);
+
+#if !defined(__CUDA_ARCH__) // this is a hack but convenient right now, would be good to add a "null-dispatch" for cuda or even better: add a device logger in cuda
+        log_reward(device, env, parameters, state, action, next_state, rng, 331);
+#endif
 
         observe(device, env, parameters, next_state, typename ENVIRONMENT::Observation{}, next_observation, rng);
         if constexpr(SPEC::PARAMETERS::ASYMMETRIC_OBSERVATIONS) {

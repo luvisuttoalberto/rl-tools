@@ -7,6 +7,7 @@
 #include "devices.h"
 
 #include <cstddef>
+#include <cstdint>
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools::devices{
     namespace arm{
@@ -31,6 +32,14 @@ namespace rl_tools::devices{
     namespace random{
         struct ARM: devices::random::Generic<typename math::ARM>, arm::Base{
             static constexpr Type TYPE = Type::random;
+            template <bool T_DYNAMIC_ALLOCATION=false>
+            struct EngineSpecification{
+                static constexpr bool DYNAMIC_ALLOCATION = T_DYNAMIC_ALLOCATION;
+            };
+            template <typename SPEC = EngineSpecification<>>
+            struct ENGINE{
+                arm::Base::index_t state;
+            };
         };
     }
     namespace logging{

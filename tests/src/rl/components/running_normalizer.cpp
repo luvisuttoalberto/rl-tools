@@ -1,5 +1,5 @@
 #include <rl_tools/operations/cpu_mux.h>
-#include <rl_tools/containers/matrix/persist.h>
+
 #include <rl_tools/rl/components/running_normalizer/operations_generic.h>
 namespace rlt = RL_TOOLS_NAMESPACE_WRAPPER ::rl_tools;
 #include <gtest/gtest.h>
@@ -19,7 +19,9 @@ void test(){
     DEVICE device;
     rlt::Matrix<rlt::matrix::Specification<T, TI, ROWS, COLS>> data;
     rlt::rl::components::RunningNormalizer<rlt::rl::components::running_normalizer::Specification<T, TI, COLS>> running_normalizer;
-    auto rng = rlt::random::default_engine(DEVICE::SPEC::RANDOM());
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, 1);
     rlt::malloc(device, data);
     rlt::malloc(device, running_normalizer);
     rlt::init(device, running_normalizer);

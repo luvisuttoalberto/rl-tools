@@ -10,8 +10,9 @@
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools::rl::algorithms{
     namespace ppo{
-        template<typename T, typename TI, TI T_BATCH_SIZE>
+        template<typename TYPE_POLICY, typename TI, TI T_BATCH_SIZE>
         struct DefaultParameters {
+            using T = typename TYPE_POLICY::DEFAULT;
             static constexpr T GAMMA = 0.99;
             static constexpr T LAMBDA = 0.95;
             static constexpr T EPSILON_CLIP = 0.2;
@@ -31,10 +32,13 @@ namespace rl_tools::rl::algorithms{
             static constexpr TI N_EPOCHS = 10;
             static constexpr TI BATCH_SIZE = T_BATCH_SIZE;
             static constexpr bool IGNORE_TERMINATION = false; // ignoring the termination flag is useful for training on environments with negative rewards, where the agent would try to terminate the episode as soon as possible otherwise
+            static constexpr bool SHUFFLE_EPOCH = true;
+            static constexpr bool STATEFUL_ACTOR_AND_CRITIC = false;
+            static constexpr bool TRUNCATE_ON_EACH_ITERATION = false;
         };
 
         template<
-                typename T_T,
+                typename T_TYPE_POLICY,
                 typename T_TI,
                 typename T_ENVIRONMENT,
                 typename T_ACTOR_TYPE,
@@ -42,7 +46,7 @@ namespace rl_tools::rl::algorithms{
                 typename T_PARAMETERS
         >
         struct Specification {
-            using T = T_T;
+            using TYPE_POLICY = T_TYPE_POLICY;
             using TI = T_TI;
             using ENVIRONMENT = T_ENVIRONMENT;
             using ACTOR_TYPE = T_ACTOR_TYPE;
@@ -65,7 +69,7 @@ namespace rl_tools::rl::algorithms{
         struct Buffers{
             using BUFFER_SPEC = T_BUFFER_SPEC;
             using SPEC = typename BUFFER_SPEC::SPEC;
-            using T = typename SPEC::T;
+            using T = typename SPEC::TYPE_POLICY::template GET<numeric_types::categories::Accumulator>;
             using TI = typename SPEC::TI;
             static constexpr TI BATCH_SIZE = SPEC::PARAMETERS::BATCH_SIZE;
             static constexpr TI ACTION_DIM = SPEC::ENVIRONMENT::ACTION_DIM;
@@ -81,7 +85,7 @@ namespace rl_tools::rl::algorithms{
     template<typename T_SPEC>
     struct PPO {
         using SPEC = T_SPEC;
-        using T = typename SPEC::T;
+        using TYPE_POLICY = typename SPEC::TYPE_POLICY;
         using TI = typename SPEC::TI;
 
         typename SPEC::ACTOR_TYPE actor;

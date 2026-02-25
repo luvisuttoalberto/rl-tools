@@ -5,6 +5,7 @@
 
 #include "matrix.h"
 #include "../../devices/cuda.h"
+#include "operations_generic.h"
 
 #include <cuda_runtime.h>
 #include <cuda.h>
@@ -25,16 +26,17 @@ namespace rl_tools{
         utils::assert_exit(device, matrix._data == nullptr, "Matrix is already allocated");
 #endif
         T *temp = nullptr;
+        // auto result = cudaMalloc(&temp, SIZE_BYTES);
         auto result = cudaMalloc(&temp, SIZE_BYTES);
+// #ifdef RL_TOOLS_DEBUG_CONTAINER_CHECK_MALLOC
+        if (result != cudaSuccess) {
+            std::cerr << "Failed to allocate container: " << cudaGetErrorString(result) << " size: " << SIZE_BYTES << std::endl;
+        }
         matrix._data = temp;
         check_status(device);
         count_malloc(device, SIZE_BYTES);
 
-#ifdef RL_TOOLS_DEBUG_CONTAINER_CHECK_MALLOC
-        if (result != cudaSuccess) {
-            std::cerr << "Failed to allocate container: " << cudaGetErrorString(result) << std::endl;
-        }
-#endif
+// #endif
     }
     template<typename DEV_SPEC, typename T, typename T_TI, T_TI SIZE_BYTES, bool T_CONST>
     void free(devices::CUDA<DEV_SPEC>& device, matrix::MatrixDynamic<T, T_TI, SIZE_BYTES, T_CONST>& matrix){
@@ -75,8 +77,8 @@ namespace rl_tools{
             using T = typename SPEC::T;
             using TI = typename DEVICE::index_t;
             TI col = blockIdx.x * blockDim.x + threadIdx.x;
-            curandState rng_state;
-            curand_init(rng, col, 0, &rng_state);
+            static_assert(SPEC::COLS <= RNG::NUM_RNGS, "Please increase the number of CUDA RNGs");
+            auto& rng_state = get(rng.states, 0, col);
             if(col < SPEC::COLS){
                 for(TI row = 0; row < SPEC::ROWS; row++){
                     T sample = random::normal_distribution::sample(typename DEVICE::SPEC::RANDOM{}, mean, std, rng_state);
@@ -104,10 +106,8 @@ namespace rl_tools{
     void copy(devices::CUDA<SOURCE_DEV_SPEC>& source_device, devices::CUDA<TARGET_DEV_SPEC>& target_device, const Matrix<SOURCE_SPEC>& source, Matrix<TARGET_SPEC>& target){
         using DEVICE_CUDA = devices::CUDA<SOURCE_DEV_SPEC>;
         using SPEC = TARGET_SPEC;
-        using T = typename SPEC::T;
-        using TI = typename SPEC::TI;
         if constexpr(containers::check_memory_layout<TARGET_SPEC, SOURCE_SPEC>){
-            cudaMemcpy(target._data, source._data, SPEC::SIZE_BYTES, cudaMemcpyDeviceToDevice);
+            cudaMemcpyAsync(target._data, source._data, SPEC::SIZE_BYTES, cudaMemcpyDeviceToDevice, source_device.stream);
             check_status(source_device);
         }
         else{
@@ -118,7 +118,6 @@ namespace rl_tools{
     void copy_layout_mismatch(devices::CPU<SOURCE_DEV_SPEC>& source_device, devices::CUDA<TARGET_DEV_SPEC>& target_device, const Matrix<SOURCE_SPEC>& source, Matrix<TARGET_SPEC>& target){
         using DEVICE_CUDA = devices::CUDA<TARGET_DEV_SPEC>;
         static_assert(containers::check_structure<TARGET_SPEC, SOURCE_SPEC>);
-//        static_assert(utils::typing::is_same_v<typename TARGET_SPEC::T, typename SOURCE_SPEC::T>);
         using SPEC = TARGET_SPEC;
         using T = typename SPEC::T;
         using TI = typename SPEC::TI;
@@ -134,7 +133,8 @@ namespace rl_tools{
             malloc(source_device, temp);
             copy(source_device, source_device, source, temp);
             auto temp_size = TEMP_SPEC::SIZE_BYTES;
-            cudaMemcpy(target._data, temp._data, temp_size, cudaMemcpyHostToDevice);
+            cudaMemcpyAsync(target._data, temp._data, temp_size, cudaMemcpyHostToDevice, target_device.stream);
+            cudaStreamSynchronize(target_device.stream);
             check_status(target_device);
             free(source_device, temp);
         }
@@ -150,10 +150,9 @@ namespace rl_tools{
     void copy(devices::CPU<SOURCE_DEV_SPEC>& source_device, devices::CUDA<TARGET_DEV_SPEC>& target_device, const Matrix<SOURCE_SPEC>& source, Matrix<TARGET_SPEC>& target){
         using DEVICE_CUDA = devices::CUDA<SOURCE_DEV_SPEC>;
         using SPEC = TARGET_SPEC;
-        using T = typename SPEC::T;
-        using TI = typename SPEC::TI;
         if constexpr(containers::check_memory_layout<TARGET_SPEC, SOURCE_SPEC>){
-            cudaMemcpy(target._data, source._data, SPEC::SIZE_BYTES, cudaMemcpyHostToDevice);
+            cudaMemcpyAsync(target._data, source._data, SPEC::SIZE_BYTES, cudaMemcpyHostToDevice, target_device.stream);
+            cudaStreamSynchronize(target_device.stream);
             check_status(target_device);
         }
         else{
@@ -169,20 +168,13 @@ namespace rl_tools{
         using SPEC = TARGET_SPEC;
         using T = typename SPEC::T;
         using TI = typename SPEC::TI;
-        Matrix<matrix::Specification<T, TI, SPEC::ROWS, SPEC::COLS, true>> temp_gpu, temp_cpu;
+        Matrix<matrix::Specification<T, TI, SPEC::ROWS, SPEC::COLS, true>> temp_gpu, temp_gpu2, temp_cpu;
         using TEMP_SPEC = typename decltype(temp_gpu)::SPEC;
         malloc(source_device, temp_gpu);
-//        {
-//            constexpr TI BLOCKSIZE_COLS = 32;
-//            constexpr TI N_BLOCKS_COLS = RL_TOOLS_DEVICES_CUDA_CEIL(TARGET_SPEC::COLS, BLOCKSIZE_COLS);
-//            dim3 grid(N_BLOCKS_COLS);
-//            dim3 block(BLOCKSIZE_COLS);
-//            containers::cuda::kernels::copy<DEVICE_CUDA, typename decltype(temp_gpu)::SPEC, SOURCE_SPEC><<<grid, block, 0, device.stream>>>(temp_gpu, source);
-//            check_status(source_device);
-//        }
         copy(source_device, source_device, source, temp_gpu);
         malloc(target_device, temp_cpu);
-        cudaMemcpy(temp_cpu._data, temp_gpu._data, TEMP_SPEC::SIZE_BYTES, cudaMemcpyDeviceToHost);
+        cudaMemcpyAsync(temp_cpu._data, temp_gpu._data, TEMP_SPEC::SIZE_BYTES, cudaMemcpyDeviceToHost, source_device.stream);
+        cudaStreamSynchronize(source_device.stream);
         check_status(source_device);
         free(source_device, temp_gpu);
         copy(target_device, target_device, temp_cpu, target);
@@ -192,10 +184,9 @@ namespace rl_tools{
     void copy(devices::CUDA<SOURCE_DEV_SPEC>& source_device, devices::CPU<TARGET_DEV_SPEC>& target_device, const Matrix<SOURCE_SPEC>& source, Matrix<TARGET_SPEC>& target){
         using DEVICE_CUDA = devices::CUDA<SOURCE_DEV_SPEC>;
         using SPEC = TARGET_SPEC;
-        using T = typename SPEC::T;
-        using TI = typename SPEC::TI;
         if constexpr(containers::check_memory_layout<TARGET_SPEC, SOURCE_SPEC>){
-            cudaMemcpy(target._data, source._data, SPEC::SIZE_BYTES, cudaMemcpyDeviceToHost);
+            cudaMemcpyAsync(target._data, source._data, SPEC::SIZE_BYTES, cudaMemcpyDeviceToHost, source_device.stream);
+            cudaStreamSynchronize(source_device.stream);
             check_status(target_device);
         }
         else{
@@ -230,42 +221,61 @@ namespace rl_tools{
     void randn(devices::CUDA<DEV_SPEC>& device, Matrix<SPEC>& m, RNG& rng){
         randn(device, m, 0, 1, rng);
     }
+    namespace containers::matrix{
+        template<bool ACCUMULATE, typename DEV_SPEC, typename INPUT_SPEC_A, typename INPUT_SPEC_B, typename OUTPUT_SPEC>
+        void multiply_blas(devices::CUDA<DEV_SPEC>& device, const Matrix<INPUT_SPEC_A>& A, const Matrix<INPUT_SPEC_B>& B, Matrix<OUTPUT_SPEC>& output) {
+            using DEVICE = devices::CUDA<DEV_SPEC>;
+            static_assert(INPUT_SPEC_A::ROWS == OUTPUT_SPEC::ROWS);
+            static_assert(INPUT_SPEC_A::COLS == INPUT_SPEC_B::ROWS);
+            static_assert(INPUT_SPEC_B::COLS == OUTPUT_SPEC::COLS);
+            static_assert(INPUT_SPEC_A::ROW_PITCH == 1 || INPUT_SPEC_A::COL_PITCH == 1); // dense row- or column-major
+            static_assert(INPUT_SPEC_B::ROW_PITCH == 1 || INPUT_SPEC_B::COL_PITCH == 1); // dense row- or column-major
+
+            using T = typename OUTPUT_SPEC::T;
+            using TI = typename DEVICE::index_t;
+
+            constexpr bool A_ROW_MAJOR = INPUT_SPEC_A::ROW_PITCH >= INPUT_SPEC_A::COLS;
+            constexpr bool B_ROW_MAJOR = INPUT_SPEC_B::ROW_PITCH >= INPUT_SPEC_B::COLS;
+            constexpr auto A_TRANSPOSE = A_ROW_MAJOR ? CUBLAS_OP_N : CUBLAS_OP_T;
+            constexpr auto B_TRANSPOSE = B_ROW_MAJOR ? CUBLAS_OP_N : CUBLAS_OP_T;
+
+            constexpr TI A_PITCH = A_ROW_MAJOR ? INPUT_SPEC_A::ROW_PITCH : INPUT_SPEC_A::COL_PITCH;
+            constexpr TI B_PITCH = B_ROW_MAJOR ? INPUT_SPEC_B::ROW_PITCH : INPUT_SPEC_B::COL_PITCH;
+
+            constexpr T alpha = 1;
+            constexpr T beta = ACCUMULATE ? 1 : 0;
+            constexpr auto m = OUTPUT_SPEC::ROWS;
+            constexpr auto k = INPUT_SPEC_A::COLS;
+            constexpr auto n = OUTPUT_SPEC::COLS;
+
+            // NOTE: cuBLAS uses the column-major format
+            // A is m x k
+            // B is k x n
+            // output is m x n
+            // A^T is k x m
+            // B^T is n x k
+            // output^T is n x m
+
+
+            cublasStatus_t stat;
+            if constexpr(utils::typing::is_same_v<T, float>){
+                stat = cublasSgemm(device.handle, B_TRANSPOSE, A_TRANSPOSE, n, m, k, &alpha, B._data, B_PITCH, A._data, A_PITCH,&beta, output._data, row_pitch(output));
+            }
+            else{
+                stat = cublasDgemm(device.handle, B_TRANSPOSE, A_TRANSPOSE, n, m, k, &alpha, B._data, B_PITCH, A._data, A_PITCH,&beta, output._data, row_pitch(output));
+            }
+            if(stat != CUBLAS_STATUS_SUCCESS){
+                std::cout << "CUBLAS ERROR: " << cublasGetStatusString(stat) << std::endl;
+            }
+        }
+    }
     template<typename DEV_SPEC, typename INPUT_SPEC_A, typename INPUT_SPEC_B, typename OUTPUT_SPEC>
-    void multiply(devices::CUDA<DEV_SPEC>& device, const Matrix<INPUT_SPEC_A>& A, const Matrix<INPUT_SPEC_B>& B, Matrix<OUTPUT_SPEC>& output) {
-        using DEVICE = devices::CUDA<DEV_SPEC>;
-        static_assert(INPUT_SPEC_A::ROWS == OUTPUT_SPEC::ROWS);
-        static_assert(INPUT_SPEC_A::COLS == INPUT_SPEC_B::ROWS);
-        static_assert(INPUT_SPEC_B::COLS == OUTPUT_SPEC::COLS);
-        static_assert(INPUT_SPEC_A::COL_PITCH == 1); // dense row-major
-        static_assert(INPUT_SPEC_B::COL_PITCH == 1); // dense row-major
-
-        using T = typename OUTPUT_SPEC::T;
-        using TI = typename DEVICE::index_t;
-
-        constexpr T alpha = 1;
-        constexpr T beta = 0;
-        constexpr auto m = OUTPUT_SPEC::ROWS;
-        constexpr auto k = INPUT_SPEC_A::COLS;
-        constexpr auto n = OUTPUT_SPEC::COLS;
-
-        // A is m x k
-        // B is k x n
-        // output is m x n
-        // A^T is k x m
-        // B^T is n x k
-        // output^T is n x m
-
-
-        cublasStatus_t stat;
-        if constexpr(utils::typing::is_same_v<T, float>){
-            stat = cublasSgemm(device.handle, CUBLAS_OP_N, CUBLAS_OP_N, n, m, k, &alpha, B._data, row_pitch(B), A._data, row_pitch(A),&beta, output._data, row_pitch(output));
-        }
-        else{
-            stat = cublasDgemm(device.handle, CUBLAS_OP_N, CUBLAS_OP_N, n, m, k, &alpha, B._data, row_pitch(B), A._data, row_pitch(A),&beta, output._data, row_pitch(output));
-        }
-        if(stat != CUBLAS_STATUS_SUCCESS){
-            std::cout << "CUBLAS ERROR: " << cublasGetStatusString(stat) << std::endl;
-        }
+    void multiply(devices::CUDA<DEV_SPEC>& device, const Matrix<INPUT_SPEC_A>& A, const Matrix<INPUT_SPEC_B>& B, Matrix<OUTPUT_SPEC>& output){
+        containers::matrix::multiply_blas<false>(device, A, B, output);
+    }
+    template<typename DEV_SPEC, typename INPUT_SPEC_A, typename INPUT_SPEC_B, typename OUTPUT_SPEC>
+    void multiply_accumulate(devices::CUDA<DEV_SPEC>& device, const Matrix<INPUT_SPEC_A>& A, const Matrix<INPUT_SPEC_B>& B, Matrix<OUTPUT_SPEC>& output){
+        containers::matrix::multiply_blas<true>(device, A, B, output);
     }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END

@@ -11,14 +11,37 @@
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools{
     template <typename DEVICE, typename SPEC>
-    std::string json(DEVICE&, rl::environments::Pendulum<SPEC>& env, typename rl::environments::Pendulum<SPEC>::Parameters& parameters){
+    std::string json(DEVICE&, rl::environments::Pendulum<SPEC>& env){
         return "{}";
     }
     template <typename DEVICE, typename SPEC>
-    std::string json(DEVICE&, rl::environments::Pendulum<SPEC>& env, typename rl::environments::Pendulum<SPEC>::Parameters& parameters, typename rl::environments::Pendulum<SPEC>::State& state){
+    std::string json(DEVICE&, rl::environments::Pendulum<SPEC>& env, typename rl::environments::Pendulum<SPEC>::Parameters& parameters){
+        return "{}";
+    }
+    template <typename DEVICE, typename SPEC, typename STATE_SPEC>
+    std::string json(DEVICE&, rl::environments::Pendulum<SPEC>& env, typename rl::environments::Pendulum<SPEC>::Parameters& parameters, typename rl::environments::pendulum::State<STATE_SPEC>& state){
         std::string json = "{";
         json += "\"theta\":" + std::to_string(state.theta) + ",";
         json += "\"theta_dot\":" + std::to_string(state.theta_dot);
+        json += "}";
+        return json;
+    }
+    template <typename DEVICE, typename SPEC, typename STATE_SPEC>
+    std::string json(DEVICE&, rl::environments::Pendulum<SPEC>& env, typename rl::environments::Pendulum<SPEC>::Parameters& parameters, typename rl::environments::pendulum::StateMultiTask<STATE_SPEC>& state){
+        std::string json = "{";
+        json += "\"theta\":" + std::to_string(state.theta) + ",";
+        json += "\"theta_dot\":" + std::to_string(state.theta_dot);
+        json += "\"invert_action\":" + std::to_string(state.invert_action);
+        json += "}";
+        return json;
+    }
+    template <typename DEVICE, typename SPEC, typename STATE_SPEC>
+    std::string json(DEVICE&, rl::environments::Pendulum<SPEC>& env, typename rl::environments::Pendulum<SPEC>::Parameters& parameters, typename rl::environments::pendulum::StateMeta<STATE_SPEC>& state){
+        std::string json = "{";
+        json += "\"theta\":" + std::to_string(state.theta) + ",";
+        json += "\"theta_dot\":" + std::to_string(state.theta_dot) + ",";
+        json += "\"invert_action\":" + std::to_string(state.invert_action) + ",";
+        json += "\"last_action\":" + std::to_string(state.last_action);
         json += "}";
         return json;
     }
@@ -110,6 +133,12 @@ export async function render(ui_state, parameters, state, action) {
 }
         )RL_TOOLS_LITERAL";
         return ui;
+    }
+    template <typename DEVICE, typename SPEC>
+    std::string get_description(DEVICE& device, rl::environments::Pendulum<SPEC>& env){
+        std::string description;
+        description += "C implementation of Pendulum-v1.";
+        return description;
     }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END

@@ -11,6 +11,12 @@
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools{
     template <typename DEVICE, typename SPEC>
+    std::string json(DEVICE&, rl::environments::multi_agent::Bottleneck<SPEC>& env){
+        std::string json = "{";
+        json += "}";
+        return json;
+    }
+    template <typename DEVICE, typename SPEC>
     std::string json(DEVICE&, rl::environments::multi_agent::Bottleneck<SPEC>& env, const typename rl::environments::multi_agent::Bottleneck<SPEC>::Parameters& parameters){
         std::string json = "{";
         json += "\"N_AGENTS\":" + std::to_string(SPEC::PARAMETERS::N_AGENTS) + ",";
@@ -270,6 +276,12 @@ export async function render(ui_state, parameters, state, action) {
 }
         )RL_TOOLS_LITERAL";
         return ui;
+    }
+    template <typename DEVICE, typename SPEC>
+    std::string get_description(DEVICE& device, rl::environments::multi_agent::Bottleneck<SPEC>& env){
+        std::string description;
+        description += "The agents have only local perception and need to squeeze through the bottleneck.";
+        return description;
     }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END

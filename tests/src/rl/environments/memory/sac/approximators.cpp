@@ -25,8 +25,9 @@ namespace rlt = rl_tools;
 
 using DEVICE = rlt::devices::DEVICE_FACTORY<>;
 //using DEVICE = rlt::devices::DefaultCPU;
-using RNG = decltype(rlt::random::default_engine(typename DEVICE::SPEC::RANDOM{}));
+using RNG = DEVICE::SPEC::RANDOM::ENGINE<>;
 using T = double;
+using TYPE_POLICY = rlt::numeric_types::Policy<T>;
 using TI = typename DEVICE::index_t;
 
 constexpr TI SEQUENCE_LENGTH = 16;
@@ -34,27 +35,29 @@ constexpr TI BATCH_SIZE = 32;
 
 using ENVIRONMENT_SPEC = rlt::rl::environments::memory::Specification<T, TI, rlt::rl::environments::memory::DefaultParameters<T, TI>>;
 using ENVIRONMENT = rlt::rl::environments::Memory<ENVIRONMENT_SPEC>;
-struct LOOP_CORE_PARAMETERS: rlt::rl::algorithms::sac::loop::core::DefaultParameters<T, TI, ENVIRONMENT>{
-    struct SAC_PARAMETERS: rlt::rl::algorithms::sac::DefaultParameters<T, TI, ENVIRONMENT::ACTION_DIM>{
+struct LOOP_CORE_PARAMETERS: rlt::rl::algorithms::sac::loop::core::DefaultParameters<TYPE_POLICY, TI, ENVIRONMENT>{
+    struct SAC_PARAMETERS: rlt::rl::algorithms::sac::DefaultParameters<TYPE_POLICY, TI, ENVIRONMENT::ACTION_DIM>{
         static constexpr TI ACTOR_BATCH_SIZE = BATCH_SIZE;
         static constexpr TI CRITIC_BATCH_SIZE = BATCH_SIZE;
     };
     static constexpr TI STEP_LIMIT = 10000;
-    static constexpr TI ACTOR_NUM_LAYERS = 2;
+    static constexpr TI ACTOR_NUM_LAYERS = 3;
     static constexpr TI ACTOR_HIDDEN_DIM = 64;
-    static constexpr TI CRITIC_NUM_LAYERS = 2;
+    static constexpr TI CRITIC_NUM_LAYERS = 3;
     static constexpr TI CRITIC_HIDDEN_DIM = 64;
-    struct ACTOR_OPTIMIZER_PARAMETERS: rlt::nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<T>{
+    struct ACTOR_OPTIMIZER_PARAMETERS: rlt::nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<TYPE_POLICY>{
         static constexpr T ALPHA = 0.01;
     };
 };
-using RNG = decltype(rlt::random::default_engine(typename DEVICE::SPEC::RANDOM{}));
+using RNG = DEVICE::SPEC::RANDOM::ENGINE<>;
 
 TEST(RL_TOOLS_RL_ALGORITHMS_SAC_SEQUENTIAL, APPROXIMATORS){
     TI seed = 0;
     DEVICE device;
-    auto rng = rlt::random::default_engine(device.random, seed);
-    using APPROXIMATORS = rlt::rl::algorithms::sac::loop::core::ConfigApproximatorsGRU<T, TI, ENVIRONMENT, LOOP_CORE_PARAMETERS>;
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, seed);
+    using APPROXIMATORS = rlt::rl::algorithms::sac::loop::core::ConfigApproximatorsGRU<TYPE_POLICY, TI, ENVIRONMENT, LOOP_CORE_PARAMETERS>;
     using CAPABILITY = rlt::nn::capability::Gradient<rlt::nn::parameters::Adam>;
     using ACTOR = APPROXIMATORS::Actor<CAPABILITY>::MODEL;
     using CRITIC = APPROXIMATORS::Critic<CAPABILITY>::MODEL;
@@ -73,6 +76,8 @@ TEST(RL_TOOLS_RL_ALGORITHMS_SAC_SEQUENTIAL, APPROXIMATORS){
     rlt::print(device, ACTOR::OUTPUT_SHAPE{});
     std::cout << std::endl;
 
+    rlt::malloc(device, actor_optimizer);
+    rlt::malloc(device, critic_optimizer);
     rlt::malloc(device, actor);
     rlt::malloc(device, actor_buffer);
     rlt::malloc(device, critic);
@@ -80,6 +85,8 @@ TEST(RL_TOOLS_RL_ALGORITHMS_SAC_SEQUENTIAL, APPROXIMATORS){
     rlt::malloc(device, critic_gru_buffer);
     rlt::init_weights(device, actor, rng);
     rlt::init_weights(device, critic, rng);
+    rlt::init(device, actor_optimizer);
+    rlt::init(device, critic_optimizer);
     rlt::reset_optimizer_state(device, actor_optimizer, actor);
     rlt::reset_optimizer_state(device, critic_optimizer, critic);
 

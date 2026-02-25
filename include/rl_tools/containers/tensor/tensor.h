@@ -8,6 +8,8 @@ namespace rl_tools{
     namespace tensor{
         struct FinalElement{
             static constexpr auto LENGTH = 0;
+            static constexpr auto FIRST = 0;
+            static constexpr auto LAST = 0;
             template <auto N>
             struct GET {
                 static_assert(N == 0, "Index out of bounds in FinalElement");
@@ -17,12 +19,19 @@ namespace rl_tools{
         struct GET_IMPL {
             static constexpr TI VALUE() {
                 if constexpr (N == 0) {
-                    // Base case: when N == 0, return the ELEMENT's VALUE
                     return ELEMENT::VALUE;
                 } else {
-                    // Recursive case: delegate to NEXT_ELEMENT with N - 1
+                    static_assert(!utils::typing::is_same_v<ELEMENT, FinalElement>, "Index out of bounds in GET_IMPL");
                     return GET_IMPL<TI, typename ELEMENT::NEXT_ELEMENT, N - 1>::VALUE();
                 }
+            }
+        };
+        
+        template <typename TI, TI N>
+        struct GET_IMPL<TI, FinalElement, N> {
+            static constexpr TI VALUE() {
+                static_assert(N == 0, "Index out of bounds accessing FinalElement");
+                return 0;
             }
         };
 
@@ -39,6 +48,17 @@ namespace rl_tools{
 
             template <TI N>
             static constexpr TI GET = GET_IMPL<TI, Element<T_TI, T_VALUE, T_NEXT_ELEMENT>, N>::VALUE();
+
+            static constexpr TI FIRST = VALUE;
+            static constexpr TI _compute_last(){
+                if constexpr (LENGTH == 0){
+                    return 0;
+                }
+                else{
+                    return GET<LENGTH-1>;
+                }
+            }
+            static constexpr TI LAST = _compute_last();
         };
 
 
@@ -62,7 +82,7 @@ namespace rl_tools{
 
     }
     template <typename TI, TI VALUE, typename NEXT_ELEMENT>
-    TI constexpr length(tensor::Element<TI, VALUE, NEXT_ELEMENT>, TI current_length=0){
+    RL_TOOLS_FUNCTION_PLACEMENT TI constexpr length(tensor::Element<TI, VALUE, NEXT_ELEMENT>, TI current_length=0){
         if constexpr(utils::typing::is_same_v<NEXT_ELEMENT, tensor::FinalElement>){
             return current_length;
         }
@@ -71,7 +91,7 @@ namespace rl_tools{
         }
     }
     template <typename TI, TI VALUE, typename NEXT_ELEMENT>
-    TI constexpr product(tensor::Element<TI, VALUE, NEXT_ELEMENT>){
+    RL_TOOLS_FUNCTION_PLACEMENT TI constexpr product(tensor::Element<TI, VALUE, NEXT_ELEMENT>){
         if constexpr(utils::typing::is_same_v<NEXT_ELEMENT, tensor::FinalElement>){
             return 1;
         }
@@ -80,7 +100,7 @@ namespace rl_tools{
         }
     }
     template <auto TARGET_INDEX_INPUT, typename TI, TI VALUE, typename NEXT_ELEMENT>
-    TI constexpr get(tensor::Element<TI, VALUE, NEXT_ELEMENT>){
+    RL_TOOLS_FUNCTION_PLACEMENT TI constexpr get(tensor::Element<TI, VALUE, NEXT_ELEMENT>){
         constexpr TI TARGET_INDEX = TARGET_INDEX_INPUT;
     //        constexpr bool LAST_ELEMENT = utils::typing::is_same_v<NEXT_ELEMENT, tensor::FinalElement>;
         static_assert(TARGET_INDEX <= length(NEXT_ELEMENT{}), "Index out of bounds");
@@ -92,7 +112,7 @@ namespace rl_tools{
         }
     }
     template <typename DEVICE, typename TI, TI VALUE, typename NEXT_ELEMENT>
-    TI get(DEVICE& device, const tensor::Element<TI, VALUE, NEXT_ELEMENT>, TI index){
+    RL_TOOLS_FUNCTION_PLACEMENT TI get(DEVICE& device, const tensor::Element<TI, VALUE, NEXT_ELEMENT>, TI index){
         utils::assert_exit(device, index < length(tensor::Element<TI, VALUE, NEXT_ELEMENT>{}), "Index out of bounds");
         if constexpr (utils::typing::is_same_v<NEXT_ELEMENT, tensor::FinalElement>){
             return VALUE;
@@ -107,7 +127,7 @@ namespace rl_tools{
         }
     }
     template <typename TI, TI VALUE, typename NEXT_ELEMENT>
-    TI constexpr get_last(tensor::Element<TI, VALUE, NEXT_ELEMENT>){
+    RL_TOOLS_FUNCTION_PLACEMENT TI constexpr get_last(tensor::Element<TI, VALUE, NEXT_ELEMENT>){
         constexpr TI TARGET_INDEX = length(tensor::Element<TI, VALUE, NEXT_ELEMENT>{}) - 1;
         if constexpr(TARGET_INDEX == 0){
             return VALUE;
@@ -219,7 +239,7 @@ namespace rl_tools{
             static constexpr auto SIZE = T_SIZE;
         };
         template <typename SHAPE, typename STRIDE>
-        bool constexpr generalized_row_major(){
+        RL_TOOLS_FUNCTION_PLACEMENT bool constexpr generalized_row_major(){
             static_assert(length(SHAPE{}) == length(STRIDE{}));
             if constexpr(length(SHAPE{}) == 1){
                 return true;
@@ -233,7 +253,7 @@ namespace rl_tools{
             }
         }
         template <typename A, typename B>
-        bool constexpr same_dimensions_shape(){
+       RL_TOOLS_FUNCTION_PLACEMENT  bool constexpr same_dimensions_shape(){
             if constexpr(length(A{}) != length(B{})){
                 return false;
             }
@@ -247,33 +267,33 @@ namespace rl_tools{
             }
         }
         template <typename SPEC_A, typename SPEC_B>
-        bool constexpr same_dimensions(){
+        RL_TOOLS_FUNCTION_PLACEMENT bool constexpr same_dimensions(){
             return same_dimensions_shape<typename SPEC_A::SHAPE, typename SPEC_B::SHAPE>();
         }
 
 
         template <typename SHAPE, typename STRIDE, bool RELAX_MAJOR=false>
-        bool constexpr _dense_row_major_layout_shape(){
+        RL_TOOLS_FUNCTION_PLACEMENT bool constexpr _dense_row_major_layout_shape(){
             static_assert(length(SHAPE{}) > 0);
             if(length(STRIDE{}) != length(SHAPE{})){
                 return false;
             }
             if constexpr(length(STRIDE{}) == 1){
-                return RELAX_MAJOR || get<0>(STRIDE{}) == 1;
+                return RELAX_MAJOR || STRIDE::FIRST == 1;
             }
             else{
-                if constexpr(RELAX_MAJOR && length(STRIDE{}) == 2){
-                    return get<0>(STRIDE{}) >= get<1>(STRIDE{}) * get<1>(SHAPE{});
+                if constexpr(RELAX_MAJOR && STRIDE::LENGTH == 2){
+                    return STRIDE::FIRST >= STRIDE::template GET<1> * SHAPE::template GET<1>;
                 }
                 else{
                     using NEXT_SHAPE = PopFront<SHAPE>;
                     using NEXT_STRIDE = PopFront<STRIDE>;
-                    return (STRIDE::VALUE == get<0>(NEXT_STRIDE{}) * get<0>(NEXT_SHAPE{})) && _dense_row_major_layout_shape<NEXT_SHAPE, NEXT_STRIDE, RELAX_MAJOR>();
+                    return (STRIDE::VALUE == NEXT_STRIDE::FIRST * NEXT_SHAPE::FIRST || ((SHAPE::FIRST == 1) && (STRIDE::VALUE >= NEXT_STRIDE::FIRST * NEXT_SHAPE::FIRST))) && _dense_row_major_layout_shape<NEXT_SHAPE, NEXT_STRIDE, RELAX_MAJOR>();
                 }
             }
         }
         template <typename SPEC, bool RELAX_MAJOR=false>
-        bool constexpr dense_row_major_layout(){
+        RL_TOOLS_FUNCTION_PLACEMENT bool constexpr dense_row_major_layout(){
             return _dense_row_major_layout_shape<typename SPEC::SHAPE, typename SPEC::STRIDE, RELAX_MAJOR>();
         }
         namespace spec::view{
@@ -299,19 +319,23 @@ namespace rl_tools{
     namespace tensor{
         template <typename T, typename TI, TI SIZE>
         struct TensorStatic{
+            static constexpr bool DYNAMIC_ALLOCATION = false;
             static_assert(SIZE > 0, "MSVC does not allow SIZE=0");
             T _data[SIZE];
         };
         template <typename T>
         struct TensorStaticEmpty{
+            static constexpr bool DYNAMIC_ALLOCATION = false;
             T* _data = nullptr;
         };
         template <typename T, typename TI, TI SIZE, bool CONST = false>
         struct TensorDynamic{
+            static constexpr bool DYNAMIC_ALLOCATION = true;
             T* _data = nullptr;
         };
         template <typename T, typename TI, TI SIZE>
         struct TensorDynamic<T, TI, SIZE, true>{
+            static constexpr bool DYNAMIC_ALLOCATION = true;
             const T* _data;
         };
     }
@@ -319,35 +343,36 @@ namespace rl_tools{
     template <typename T_SPEC>
     struct Tensor: utils::typing::conditional_t<T_SPEC::DYNAMIC_ALLOCATION, tensor::TensorDynamic<typename T_SPEC::T, typename T_SPEC::TI, T_SPEC::SIZE, T_SPEC::CONST>, utils::typing::conditional_t<(T_SPEC::SIZE > 0), tensor::TensorStatic<typename T_SPEC::T, typename T_SPEC::TI, T_SPEC::SIZE>, tensor::TensorStaticEmpty<typename T_SPEC::T>>>{
         using SPEC = T_SPEC;
+        using SHAPE = typename SPEC::SHAPE;
         using T = typename SPEC::T;
         template <typename VIEW_SPEC>
         using VIEW_POINT = Tensor<tensor::spec::view::point::Specification<SPEC, VIEW_SPEC, SPEC::CONST>>;
         template <typename VIEW_SPEC>
         using VIEW_RANGE = Tensor<tensor::spec::view::range::Specification<SPEC, VIEW_SPEC, SPEC::CONST>>;
-        Tensor() = default;
+        // Tensor() = default;
 //        Tensor(DATA_TYPE data): _data(data){};
     };
 
     template <typename T, typename TI, TI SIZE>
-    constexpr auto data(tensor::TensorStatic<T, TI, SIZE>& tensor){
+    RL_TOOLS_FUNCTION_PLACEMENT auto data(tensor::TensorStatic<T, TI, SIZE>& tensor){
         return tensor._data;
     }
     template <typename T, typename TI, TI SIZE>
-    constexpr auto data(const tensor::TensorStatic<T, TI, SIZE>& tensor){
+    RL_TOOLS_FUNCTION_PLACEMENT auto data(const tensor::TensorStatic<T, TI, SIZE>& tensor){
         return &tensor._data[0];
     }
 
     template <typename T, typename TI, TI SIZE, bool CONST>
-    constexpr auto data(tensor::TensorDynamic<T, TI, SIZE, CONST>& tensor){
+    RL_TOOLS_FUNCTION_PLACEMENT auto data(tensor::TensorDynamic<T, TI, SIZE, CONST>& tensor){
         return tensor._data;
     }
     template <typename T, typename TI, TI SIZE, bool CONST>
-    constexpr auto data(const tensor::TensorDynamic<T, TI, SIZE, CONST>& tensor){
+    RL_TOOLS_FUNCTION_PLACEMENT auto data(const tensor::TensorDynamic<T, TI, SIZE, CONST>& tensor){
         return &tensor._data[0];
     }
 
     template <typename T, typename TI, TI SIZE, bool CONST>
-    constexpr T** data_pointer(tensor::TensorDynamic<T, TI, SIZE, CONST>& tensor){
+    RL_TOOLS_FUNCTION_PLACEMENT T** data_pointer(tensor::TensorDynamic<T, TI, SIZE, CONST>& tensor){
         return &tensor._data;
     }
 }

@@ -3,7 +3,7 @@
 
 #include <rl_tools/containers/tensor/operations_generic.h>
 #include <rl_tools/containers/tensor/operations_cpu.h>
-#include <rl_tools/containers/tensor/persist.h>
+
 
 #include <rl_tools/nn/layers/gru/operations_generic.h>
 
@@ -16,6 +16,13 @@ namespace rlt = rl_tools;
 
 
 #include "../../../utils/utils.h"
+
+
+struct SPEC{};
+using RESET_MODE = rlt::Mode<rlt::nn::layers::gru::ResetMode<rlt::mode::Default<>, rlt::nn::layers::gru::ResetModeSpecification<int, int>>>;
+static_assert(rlt::nn::layers::gru::mode::can_reset_sample<void>(RESET_MODE{}) == true);
+using DEFAULT_MODE = rlt::Mode<rlt::mode::Default<>>;
+static_assert(rlt::nn::layers::gru::mode::can_reset_sample<void>(DEFAULT_MODE{}) == false);
 
 TEST(RL_TOOLS_NN_LAYERS_GRU, MATRIX_MULTIPLICATION_TRANSPOSE_GENERIC){
     using DEVICE = rlt::devices::DefaultCPU;
@@ -76,9 +83,12 @@ template <bool USE_RESET_MODE>
 void test_loading(std::string DATA_FILE_NAME){
     using DEVICE = rlt::devices::DefaultCPU;
     using T = double;
+    using TYPE_POLICY = rlt::numeric_types::Policy<T>;
     using TI = DEVICE::index_t;
     DEVICE device;
-    auto rng = rlt::random::default_engine(device.random, 0);
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, 0);
     constexpr T EPSILON = 1e-10;
     constexpr TI SEQUENCE_LENGTH = 50;
     constexpr TI BATCH_SIZE = 128;
@@ -102,7 +112,7 @@ void test_loading(std::string DATA_FILE_NAME){
     using GRU_HIDDEN_BIAS_SHAPE = rlt::tensor::Shape<TI, HIDDEN_DIM>;
     rlt::Tensor<rlt::tensor::Specification<T, TI, GRU_HIDDEN_BIAS_SHAPE>> grad_b_hr, grad_b_hz, grad_b_hn;
 
-    using GRU_CONFIG = rlt::nn::layers::gru::Configuration<T, TI, HIDDEN_DIM, rlt::nn::parameters::Gradient>;
+    using GRU_CONFIG = rlt::nn::layers::gru::Configuration<TYPE_POLICY, TI, HIDDEN_DIM, rlt::nn::parameters::Gradient>;
     using CAPABILITY = rlt::nn::capability::Gradient<rlt::nn::parameters::Adam>;
     using INPUT_SHAPE = rlt::tensor::Shape<TI, SEQUENCE_LENGTH, BATCH_SIZE, INPUT_DIM>;
     rlt::nn::layers::gru::Layer<GRU_CONFIG, CAPABILITY, INPUT_SHAPE> gru;
@@ -133,22 +143,22 @@ void test_loading(std::string DATA_FILE_NAME){
 
     rlt::init_weights(device, gru, rng);
 
-    const char *data_path_stub = RL_TOOLS_MACRO_TO_STR(RL_TOOLS_TESTS_DATA_PATH);
+    const char *data_path_stub = RL_TOOLS_MACRO_TO_STR(RL_TOOLS_TEST_DATA_PATH);
     std::string DATA_FILE_PATH = std::string(data_path_stub) + "/" + DATA_FILE_NAME;
     std::cout << "DATA_FILE_PATH: " << DATA_FILE_PATH << std::endl;
     auto output_file = HighFive::File(std::string(DATA_FILE_PATH), HighFive::File::ReadOnly);
     for(auto epoch_group_name : output_file.listObjectNames()){
         auto epoch_group = output_file.getGroup(epoch_group_name);
         for(auto batch_group_name: epoch_group.listObjectNames()){
-            auto batch_group = epoch_group.getGroup(batch_group_name);
+            auto batch_group = rlt::get_group(device, epoch_group, batch_group_name);
             rlt::load(device, input, batch_group, "input");
             bool d_input_set = false;
-            if(batch_group.exist("d_input")){
+            if(batch_group.group.exist("d_input")){
                 rlt::load(device, dinput_real, batch_group, "d_input");
                 d_input_set = true;
             }
             rlt::load(device, gru_output, batch_group, "gru_output");
-            auto weight_group = batch_group.getGroup("weights");
+            auto weight_group = rlt::get_group(device, batch_group, "weights");
             using VIEW_SPEC = rlt::tensor::ViewSpec<0, GRU_CONFIG::HIDDEN_DIM>;
             auto W_ir = view_range(device, gru.weights_input.parameters, 0*GRU_CONFIG::HIDDEN_DIM, VIEW_SPEC{});
             auto W_iz = view_range(device, gru.weights_input.parameters, 1*GRU_CONFIG::HIDDEN_DIM, VIEW_SPEC{});
@@ -191,8 +201,8 @@ void test_loading(std::string DATA_FILE_NAME){
 //            rlt::print(device, dloss_dgru_output_view);
             rlt::zero_gradient(device, gru);
             for(TI step=SEQUENCE_LENGTH-1; true; step--){
-                auto backward_group = batch_group.getGroup("backward");
-                auto gradient_group_step = backward_group.getGroup(std::to_string(step));
+                auto backward_group = rlt::get_group(device, batch_group, "backward");
+                auto gradient_group_step = rlt::get_group(device, backward_group, std::to_string(step));
                 rlt::load(device, grad_W_ir, gradient_group_step, "W_ir");
                 rlt::load(device, grad_W_iz, gradient_group_step, "W_iz");
                 rlt::load(device, grad_W_in, gradient_group_step, "W_in");

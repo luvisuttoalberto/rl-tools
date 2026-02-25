@@ -28,6 +28,18 @@ export class ShowRun{
         name_label.innerText = "Name: "
         description.appendChild(name_label)
         description.appendChild(latest_run_name)
+        
+        // Add source label if available
+        if(run.config._source){
+            const latest_run_source = document.createElement("span")
+            latest_run_source.innerText = run.config._source
+            const source_label = document.createElement("b")
+            description.appendChild(document.createElement("br"))
+            source_label.innerText = "Source: "
+            description.appendChild(source_label)
+            description.appendChild(latest_run_source)
+        }
+        
         const latest_run_config = document.createElement("span")
         latest_run_config.innerText = JSON.stringify(run.config.population)
         const config_label = document.createElement("b")
@@ -49,6 +61,22 @@ export class ShowRun{
         checkpoint_label.innerText = "Checkpoint: "
         description.appendChild(checkpoint_label)
         description.appendChild(latest_run_checkpoint)
+
+        if(run.description){
+            description.appendChild(document.createElement("br"))
+            const description_label = document.createElement("b")
+            description_label.innerText = "Description: "
+            const description_button = document.createElement("button")
+            description_button.classList.add("info-button")
+            description_button.innerText = "i"
+            description_button.onclick = () => {
+                fetch(run.description).then(response => response.text()).then(text => {
+                    alert(text)
+                })
+            }
+            description.appendChild(description_label)
+            description.appendChild(description_button)
+        }
 
         container.appendChild(description)
 

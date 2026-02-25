@@ -12,36 +12,40 @@
 #include <gtest/gtest.h>
 
 
-#define DTYPE float
-const DTYPE STATE_TOLERANCE = 0.00001;
+using DTYPE =  float;
+constexpr DTYPE STATE_TOLERANCE = 0.00001;
 
 namespace rlt = RL_TOOLS_NAMESPACE_WRAPPER ::rl_tools;
+
+using TYPE_POLICY = rlt::numeric_types::Policy<float>;
 
 using DEVICE = rlt::devices::DefaultCPU;
 using TI = typename DEVICE::index_t;
 using T = DTYPE;
 using ENVIRONMENT_SPEC = rlt::rl::environments::pendulum::Specification<DTYPE, DEVICE::index_t, rlt::rl::environments::pendulum::DefaultParameters<DTYPE>>;
 using ENVIRONMENT = rlt::rl::environments::Pendulum<ENVIRONMENT_SPEC>;
-using EXPLORATION_POLICY_SPEC = rlt::nn_models::random_uniform::Specification<T, TI, ENVIRONMENT::Observation::DIM, ENVIRONMENT::ACTION_DIM, rlt::nn_models::random_uniform::Range::MINUS_ONE_TO_ONE>;
+using EXPLORATION_POLICY_SPEC = rlt::nn_models::random_uniform::Specification<TYPE_POLICY, TI, ENVIRONMENT::Observation::DIM, ENVIRONMENT::ACTION_DIM, rlt::nn_models::random_uniform::Range::MINUS_ONE_TO_ONE>;
 using EXPLORATION_POLICY = rlt::nn_models::RandomUniform<EXPLORATION_POLICY_SPEC>;
 constexpr TI BATCH_SIZE = 1;
 
 using INPUT_SHAPE = rlt::tensor::Shape<TI, 1, BATCH_SIZE, ENVIRONMENT::Observation::DIM>;
-using MLP_CONFIG = rlt::nn_models::mlp::Configuration<DTYPE, DEVICE::index_t, ENVIRONMENT::ACTION_DIM, 3, 30, rlt::nn::activation_functions::GELU, rlt::nn::activation_functions::IDENTITY>;
+using MLP_CONFIG = rlt::nn_models::mlp::Configuration<TYPE_POLICY, DEVICE::index_t, ENVIRONMENT::ACTION_DIM, 3, 30, rlt::nn::activation_functions::GELU, rlt::nn::activation_functions::IDENTITY>;
 using MLP = rlt::nn_models::mlp::NeuralNetwork<MLP_CONFIG, rlt::nn::capability::Gradient<rlt::nn::parameters::Adam>, INPUT_SHAPE>;
 
 using POLICIES = rl_tools::utils::Tuple<TI, EXPLORATION_POLICY, MLP>;
-typedef rlt::rl::components::off_policy_runner::Specification<DTYPE, DEVICE::index_t, ENVIRONMENT, POLICIES, rlt::rl::components::off_policy_runner::ParametersDefault<DTYPE, DEVICE::index_t>> OffPolicyRunnerSpec;
+typedef rlt::rl::components::off_policy_runner::Specification<TYPE_POLICY, DEVICE::index_t, ENVIRONMENT, POLICIES, rlt::rl::components::off_policy_runner::ParametersDefault<TYPE_POLICY, DEVICE::index_t>> OffPolicyRunnerSpec;
 typedef rlt::rl::components::OffPolicyRunner<OffPolicyRunnerSpec> OffPolicyRunner;
 
 TEST(RL_TOOLS_RL_ALGORITHMS_OFF_POLICY_RUNNER_TEST, TEST_0) {
-    using OPTIMIZER_SPEC = rlt::nn::optimizers::adam::Specification<DTYPE, TI>;
+    using OPTIMIZER_SPEC = rlt::nn::optimizers::adam::Specification<TYPE_POLICY, TI>;
     using OPTIMIZER = rlt::nn::optimizers::Adam<OPTIMIZER_SPEC>;
     DEVICE device;
     OPTIMIZER optimizer;
     MLP policy;
     rlt::malloc(device, policy);
-    auto rng = rlt::random::default_engine(DEVICE::SPEC::RANDOM(), 0);
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, 0);
     rlt::init_weights(device, policy, rng);
     OffPolicyRunner off_policy_runner;
     rlt::malloc(device, off_policy_runner);
@@ -59,7 +63,9 @@ TEST(RL_TOOLS_RL_ALGORITHMS_OFF_POLICY_RUNNER_TEST, TEST_0) {
 TEST(RL_TOOLS_RL_ALGORITHMS_OFF_POLICY_RUNNER_TEST, SEQUENTIAL_BATCH) {
     DEVICE device;
     EXPLORATION_POLICY policy;
-    auto rng = rlt::random::default_engine(DEVICE::SPEC::RANDOM(), 0);
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, 0);
     OffPolicyRunner off_policy_runner;
     rlt::malloc(device, off_policy_runner);
     ENVIRONMENT envs[OffPolicyRunnerSpec::PARAMETERS::N_ENVIRONMENTS];
@@ -84,7 +90,7 @@ TEST(RL_TOOLS_RL_ALGORITHMS_OFF_POLICY_RUNNER_TEST, SEQUENTIAL_BATCH) {
         rlt::add(device, replay_buffer, state, observation, observation, action, reward, next_state, observation, observation, terminated, truncated);
     }
     constexpr TI SEQUENCE_LENGTH = 10;
-    OffPolicyRunner::SequentialBatch<SEQUENCE_LENGTH, BATCH_SIZE> batch;
+    rlt::rl::components::off_policy_runner::SequentialBatch<rlt::rl::components::off_policy_runner::SequentialBatchSpecification<OffPolicyRunnerSpec, SEQUENCE_LENGTH, BATCH_SIZE>> batch;
     rlt::malloc(device, batch);
 
     rlt::gather_batch(device, off_policy_runner, batch, rng);
@@ -97,9 +103,9 @@ TEST(RL_TOOLS_RL_ALGORITHMS_OFF_POLICY_RUNNER_TEST, SEQUENTIAL_BATCH) {
             if(seq_step_i > 0 && !reset){
                 ASSERT_EQ(previous_number+1, (TI)reward);
             }
-            T action = rlt::get(device, batch.actions, seq_step_i, batch_i, 0);
-            T observation = rlt::get(device, batch.observations, seq_step_i, batch_i, 0);
-            T observation_priv = rlt::get(device, batch.observations_privileged, seq_step_i, batch_i, 0);
+            T action = rlt::get(device, batch.actions_current, seq_step_i, batch_i, 0);
+            T observation = rlt::get(device, batch.observations_current, seq_step_i, batch_i, 0);
+            T observation_priv = rlt::get(device, batch.observations_privileged_current, seq_step_i, batch_i, 0);
             std::cout << "roa: " << reward << " | " << observation << " | " << observation_priv << " | " << action << " reset: " << reset << std::endl;
             previous_number = reward;
         }

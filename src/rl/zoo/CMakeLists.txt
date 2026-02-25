@@ -1,9 +1,9 @@
-
 function(RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT TARGET)
     if(RL_TOOLS_ENABLE_CLI11)
         target_link_libraries(${TARGET} PRIVATE CLI11::CLI11)
     endif()
 endfunction()
+
 
 # Pendulum-v1
 # PPO
@@ -18,12 +18,101 @@ target_link_libraries(rl_zoo_pendulum_v1_sac PRIVATE RLtools::RLtools)
 RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_pendulum_v1_sac)
 target_compile_definitions(rl_zoo_pendulum_v1_sac PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_SAC)
 target_compile_definitions(rl_zoo_pendulum_v1_sac PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_PENDULUM_V1)
+# SAC Benchmark
+add_executable(rl_zoo_pendulum_v1_sac_benchmark zoo_cli.cpp zoo.cpp)
+target_link_libraries(rl_zoo_pendulum_v1_sac_benchmark PRIVATE RLtools::RLtools)
+RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_pendulum_v1_sac_benchmark)
+target_compile_definitions(rl_zoo_pendulum_v1_sac_benchmark PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_SAC)
+target_compile_definitions(rl_zoo_pendulum_v1_sac_benchmark PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_PENDULUM_V1)
+target_compile_definitions(rl_zoo_pendulum_v1_sac_benchmark PRIVATE RL_TOOLS_RL_ZOO_BENCHMARK)
 # TD3
 add_executable(rl_zoo_pendulum_v1_td3 zoo_cli.cpp zoo.cpp)
 target_link_libraries(rl_zoo_pendulum_v1_td3 PRIVATE RLtools::RLtools)
 RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_pendulum_v1_td3)
 target_compile_definitions(rl_zoo_pendulum_v1_td3 PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_TD3)
 target_compile_definitions(rl_zoo_pendulum_v1_td3 PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_PENDULUM_V1)
+
+# PendulumVelocity-v1
+# SAC
+add_executable(rl_zoo_pendulum_position_v1_sac zoo_cli.cpp zoo.cpp)
+target_link_libraries(rl_zoo_pendulum_position_v1_sac PRIVATE RLtools::RLtools)
+RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_pendulum_position_v1_sac)
+target_compile_definitions(rl_zoo_pendulum_position_v1_sac PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_SAC)
+target_compile_definitions(rl_zoo_pendulum_position_v1_sac PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_PENDULUM_POSITION_V1)
+# TD3
+add_executable(rl_zoo_pendulum_position_v1_td3 zoo_cli.cpp zoo.cpp)
+target_link_libraries(rl_zoo_pendulum_position_v1_td3 PRIVATE RLtools::RLtools)
+RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_pendulum_position_v1_td3)
+target_compile_definitions(rl_zoo_pendulum_position_v1_td3 PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_TD3 RL_TOOLS_RL_ZOO_ENVIRONMENT_PENDULUM_POSITION_V1)
+
+# PPO
+add_executable(rl_zoo_pendulum_position_v1_ppo zoo_cli.cpp zoo.cpp)
+target_link_libraries(rl_zoo_pendulum_position_v1_ppo PRIVATE RLtools::RLtools)
+RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_pendulum_position_v1_ppo)
+target_compile_definitions(rl_zoo_pendulum_position_v1_ppo PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_PPO RL_TOOLS_RL_ZOO_ENVIRONMENT_PENDULUM_POSITION_V1)
+
+# PendulumMultiTask-v1
+# PPO
+add_executable(rl_zoo_pendulum_multitask_v1_ppo zoo_cli.cpp zoo.cpp)
+target_link_libraries(rl_zoo_pendulum_multitask_v1_ppo PRIVATE RLtools::RLtools)
+RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_pendulum_multitask_v1_ppo)
+target_compile_definitions(rl_zoo_pendulum_multitask_v1_ppo PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_PPO)
+target_compile_definitions(rl_zoo_pendulum_multitask_v1_ppo PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_PENDULUM_MULTITASK_V1)
+# SAC
+add_executable(rl_zoo_pendulum_multitask_v1_sac zoo_cli.cpp zoo.cpp)
+target_link_libraries(rl_zoo_pendulum_multitask_v1_sac PRIVATE RLtools::RLtools)
+RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_pendulum_multitask_v1_sac)
+target_compile_definitions(rl_zoo_pendulum_multitask_v1_sac PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_SAC)
+target_compile_definitions(rl_zoo_pendulum_multitask_v1_sac PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_PENDULUM_MULTITASK_V1)
+#target_compile_definitions(rl_zoo_pendulum_multitask_v1_sac PRIVATE RL_TOOLS_RL_ZOO_BENCHMARK)
+if(RL_TOOLS_ENABLE_TRACY)
+    target_link_libraries(rl_zoo_pendulum_multitask_v1_sac PRIVATE Tracy::TracyClient)
+    target_include_directories(rl_zoo_pendulum_multitask_v1_sac PRIVATE ${PROJECT_SOURCE_DIR}/../external/tracy/public/tracy)
+    target_compile_definitions(rl_zoo_pendulum_multitask_v1_sac PRIVATE RL_TOOLS_ENABLE_TRACY)
+endif()
+# TD3
+add_executable(rl_zoo_pendulum_multitask_v1_td3 zoo_cli.cpp zoo.cpp)
+target_link_libraries(rl_zoo_pendulum_multitask_v1_td3 PRIVATE RLtools::RLtools)
+RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_pendulum_multitask_v1_td3)
+target_compile_definitions(rl_zoo_pendulum_multitask_v1_td3 PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_TD3)
+target_compile_definitions(rl_zoo_pendulum_multitask_v1_td3 PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_PENDULUM_MULTITASK_V1)
+
+# Flag
+# SAC
+add_executable(rl_zoo_flag_sac zoo_cli.cpp zoo.cpp)
+target_link_libraries(rl_zoo_flag_sac PRIVATE RLtools::RLtools)
+RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_flag_sac)
+target_compile_definitions(rl_zoo_flag_sac PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_SAC)
+target_compile_definitions(rl_zoo_flag_sac PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_FLAG)
+# TD3
+add_executable(rl_zoo_flag_td3 zoo_cli.cpp zoo.cpp)
+target_link_libraries(rl_zoo_flag_td3 PRIVATE RLtools::RLtools)
+RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_flag_td3)
+target_compile_definitions(rl_zoo_flag_td3 PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_TD3)
+target_compile_definitions(rl_zoo_flag_td3 PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_FLAG)
+# PPO
+if(NOT WIN32) # MSVC does not support zero sized arrays (which occurs in the hidden layers of the MLP in this config)
+add_executable(rl_zoo_flag_ppo zoo_cli.cpp zoo.cpp)
+target_link_libraries(rl_zoo_flag_ppo PRIVATE RLtools::RLtools)
+RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_flag_ppo)
+target_compile_definitions(rl_zoo_flag_ppo PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_PPO)
+target_compile_definitions(rl_zoo_flag_ppo PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_FLAG)
+target_compile_options(rl_zoo_flag_ppo PRIVATE -ftemplate-backtrace-limit=0)
+# PPO-GRU-ASYMMETRIC
+add_executable(rl_zoo_flag_ppo_gru_asymmetric zoo_cli.cpp zoo.cpp)
+target_link_libraries(rl_zoo_flag_ppo_gru_asymmetric PRIVATE RLtools::RLtools)
+RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_flag_ppo_gru_asymmetric)
+target_compile_definitions(rl_zoo_flag_ppo_gru_asymmetric PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_PPO)
+target_compile_definitions(rl_zoo_flag_ppo_gru_asymmetric PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_PPO_GRU_ASYMMETRIC)
+target_compile_definitions(rl_zoo_flag_ppo_gru_asymmetric PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_FLAG)
+# PPO-GRU
+add_executable(rl_zoo_flag_ppo_gru zoo_cli.cpp zoo.cpp)
+target_link_libraries(rl_zoo_flag_ppo_gru PRIVATE RLtools::RLtools)
+RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_flag_ppo_gru)
+target_compile_definitions(rl_zoo_flag_ppo_gru PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_PPO)
+target_compile_definitions(rl_zoo_flag_ppo_gru PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_PPO_GRU)
+target_compile_definitions(rl_zoo_flag_ppo_gru PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_FLAG)
+endif()
 
 # AcrobotSwingup-v0
 # SAC
@@ -40,19 +129,25 @@ target_link_libraries(rl_zoo_l2f_sac PRIVATE RLtools::RLtools)
 RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_l2f_sac)
 target_compile_definitions(rl_zoo_l2f_sac PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_SAC)
 target_compile_definitions(rl_zoo_l2f_sac PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_L2F)
+if(NOT WIN32)
+target_compile_options(rl_zoo_l2f_sac PRIVATE -ftemplate-backtrace-limit=0)
+endif()
 # SAC BENCHMARK
 add_executable(rl_zoo_l2f_sac_benchmark zoo_cli.cpp zoo.cpp)
 target_link_libraries(rl_zoo_l2f_sac_benchmark PRIVATE RLtools::RLtools)
 RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_l2f_sac_benchmark)
 target_compile_definitions(rl_zoo_l2f_sac_benchmark PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_SAC)
 target_compile_definitions(rl_zoo_l2f_sac_benchmark PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_L2F)
-target_compile_definitions(rl_zoo_l2f_sac_benchmark PRIVATE BENCHMARK)
+target_compile_definitions(rl_zoo_l2f_sac_benchmark PRIVATE RL_TOOLS_RL_ZOO_BENCHMARK)
 # TD3
 add_executable(rl_zoo_l2f_td3 zoo_cli.cpp zoo.cpp)
 target_link_libraries(rl_zoo_l2f_td3 PRIVATE RLtools::RLtools)
 RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_l2f_td3)
 target_compile_definitions(rl_zoo_l2f_td3 PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_TD3)
 target_compile_definitions(rl_zoo_l2f_td3 PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_L2F)
+if(NOT WIN32)
+target_compile_options(rl_zoo_l2f_td3 PRIVATE -ftemplate-backtrace-limit=0)
+endif()
 # PPO
 add_executable(rl_zoo_l2f_ppo zoo_cli.cpp zoo.cpp)
 target_link_libraries(rl_zoo_l2f_ppo PRIVATE RLtools::RLtools)
@@ -109,3 +204,6 @@ if(RL_TOOLS_RL_ENVIRONMENTS_ENABLE_MUJOCO)
     target_compile_definitions(rl_zoo_ant_v4_td3 PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_TD3)
     target_compile_definitions(rl_zoo_ant_v4_td3 PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_ANT_V4)
 endif()
+
+#add_executable(rl_zoo_load_checkpoint_code load_checkpoint_code.cpp)
+#target_link_libraries(rl_zoo_load_checkpoint_code PRIVATE RLtools::RLtools)

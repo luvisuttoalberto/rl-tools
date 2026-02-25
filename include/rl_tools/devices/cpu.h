@@ -11,6 +11,9 @@
 #include <algorithm>
 #include <ctime>
 #include <limits>
+#include <random>
+#include <iostream>
+
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools::devices{
     namespace cpu{
@@ -36,6 +39,11 @@ namespace rl_tools::devices{
     namespace random{
         struct CPU: devices::random::Generic<devices::math::CPU>, cpu::Base{
             static constexpr Type TYPE = Type::random;
+            template <typename T_ENGINE = std::mt19937>
+            struct ENGINE{
+                using TYPE = T_ENGINE;
+                TYPE engine;
+            };
         };
     }
     namespace logging{
@@ -50,13 +58,8 @@ namespace rl_tools::devices{
         typename SPEC::MATH math;
         typename SPEC::RANDOM random;
         typename SPEC::LOGGING logger;
-        std::string run_name;
-        std::string runs_path;
-        std::string run_path;
         bool initialized = false;
-#ifdef RL_TOOLS_DEBUG_CONTAINER_COUNT_MALLOC
         index_t malloc_counter = 0;
-#endif
     };
 
     using DefaultCPUSpecification = cpu::Specification<math::CPU, random::CPU, logging::CPU>;
@@ -67,36 +70,132 @@ RL_TOOLS_NAMESPACE_WRAPPER_END
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools{
     namespace devices::cpu{
-        std::string sanitize_file_name(const std::string &input) {
-            std::string output = input;
+        void display_compile_options() {
+            bool isOptimal = true;
+            const char* ANSI_RED = "\033[31m";
+            const char* ANSI_GREEN = "\033[32m";
+            const char* ANSI_YELLOW = "\033[33m";
+            const char* ANSI_RESET = "\033[0m";
 
-            const std::string invalid_chars = R"(<>:\"/\|?*)";
+            // Check debug mode
+            bool isDebug =
+            #if defined(_DEBUG) || defined(DEBUG)
+                true;
+            #else
+                false;
+            #endif
+            if (isDebug) isOptimal = false;
 
-            std::replace_if(output.begin(), output.end(), [&invalid_chars](const char &c) {
-                return invalid_chars.find(c) != std::string::npos;
-            }, '_');
+            // Check optimization
+            bool maxOpt =
+            #if defined(_MSC_VER)
+                #if defined(_FULL_OPTIMIZATION)
+                    true;
+                #else
+                    false;
+                #endif
+            #elif defined(__GNUC__) || defined(__clang__)
+                #if defined(__OPTIMIZE__)
+                    true;
+                #else
+                    false;
+                #endif
+            #else
+                false;
+            #endif
+            if (!maxOpt) isOptimal = false;
 
-            return output;
+            // Check fast math
+            bool fastMath =
+            #if defined(__FAST_MATH__) || defined(_M_FP_FAST)
+                true;
+            #else
+                false;
+            #endif
+            if (!fastMath) isOptimal = false;
+
+            if (!isOptimal) {
+                std::cerr << "Compiliation Options:" << std::endl;
+
+                // Output debug status
+                std::cerr << ((!isDebug) ? ANSI_GREEN : ANSI_RED) << "["
+                          << ((!isDebug) ? "OK" : "NOT OK") << "]" << ANSI_RESET
+                          << " Debug Mode: " << (isDebug ? "Yes" : "No") << std::endl;
+
+                // Output optimization status
+                std::cerr << (maxOpt ? ANSI_GREEN : ANSI_RED) << "["
+                          << (maxOpt ? "OK" : "NOT OK") << "]" << ANSI_RESET
+                          << " Optimization: " << (maxOpt ? "Yes" : "No") << std::endl;
+
+                // Output fast math status
+                std::cerr << (fastMath ? ANSI_GREEN : ANSI_RED) << "["
+                          << (fastMath ? "OK" : "NOT OK") << "]" << ANSI_RESET
+                          << " Fast Math: " << (fastMath ? "Yes" : "No") << std::endl;
+
+                // Output optimization level
+                std::cerr << "Optimization Level: "
+                #if defined(_MSC_VER)
+                    #if defined(_FULL_OPTIMIZATION)
+                          << "Full (/Ox)"
+                    #elif defined(_OPTIMIZATION_FULL)
+                          << "Full (/O2)"
+                    #elif defined(_OPTIMIZATION_SPEED)
+                          << "Speed (/O2)"
+                    #elif defined(_OPTIMIZATION_DEBUG)
+                          << "Debug (/Od)"
+                    #else
+                          << "Unknown"
+                    #endif
+                #elif defined(__clang__)
+                    #if defined(__OPTIMIZE__)
+                        #if defined(__OPTIMIZE_SIZE__)
+                              << "-Os"
+                        #elif (__OPTIMIZE__ == 1)
+                              << "-O1"
+                        #elif (__OPTIMIZE__ == 2)
+                              << "-O2"
+                        #elif (__OPTIMIZE__ == 3)
+                              << "-O3"
+                        #else
+                              << "Unknown level"
+                        #endif
+                    #else
+                          << "-O0"
+                    #endif
+                #else
+                          << "Unknown"
+                #endif
+                          << std::endl;
+
+                std::cerr << ANSI_YELLOW << "WARNING: Non-optimal configuration detected!"
+                          << ANSI_RESET << std::endl;
+                std::cerr << "For maximum performance, compile with:" << std::endl;
+                #if defined(_MSC_VER)
+                    std::cerr << "MSVC: /O2 /fp:fast /DNDEBUG" << std::endl;
+                #elif defined(__GNUC__) || defined(__clang__)
+                    std::cerr << "GCC/Clang: -Ofast (or -DCMAKE_BUILD_TYPE=Release)" << std::endl;
+                #else
+                    std::cerr << "Unknown compiler: please consult compiler documentation" << std::endl;
+                #endif
+                std::cerr << std::endl;
+            }
         }
     }
     template <typename DEV_SPEC>
     void init(devices::CPU<DEV_SPEC>& device){
         if(!device.initialized){
-            time_t now;
-            time(&now);
-            char buf[sizeof "0000-00-00T00:00:00Z"];
-            strftime(buf, sizeof buf, "%FT%TZ", localtime(&now));
-            device.run_name = devices::cpu::sanitize_file_name(buf);
-            device.runs_path = std::string("runs");
-            device.run_path = device.runs_path + "/" + device.run_name;
+#ifndef __CLING__
+            devices::cpu::display_compile_options();
+#endif
             device.initialized = true;
         }
     }
     template <typename DEV_SPEC, typename TI>
     void count_malloc(devices::CPU<DEV_SPEC>& device, TI size){
-#ifdef RL_TOOLS_DEBUG_CONTAINER_COUNT_MALLOC
         device.malloc_counter += size;
-#endif
+        if (size > 100000000){
+            std::cerr << "Large malloc: " << size / 1000000 << "MB, total: " << device.malloc_counter / 1000000 << " MB" << std::endl;
+        }
     }
     template <typename SPEC>
     void check_status(devices::CPU<SPEC>& device){ }

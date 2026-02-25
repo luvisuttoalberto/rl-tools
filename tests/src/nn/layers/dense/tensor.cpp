@@ -16,7 +16,9 @@ using TI = typename DEVICE::index_t;
 
 TEST(RL_TOOLS_NN_LAYERS_DENSE_TENSOR, MAIN) {
     DEVICE device;
-    auto rng = rlt::random::default_engine(device.random, 0);
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, 0);
     using T = float;
     rlt::Tensor<rlt::tensor::Specification<T, TI, rlt::tensor::Shape<TI, 10, 15>>> tensor;
     rlt::Matrix<rlt::matrix::Specification<T, TI, 10, 15>> matrix;
@@ -42,7 +44,9 @@ TEST(RL_TOOLS_NN_LAYERS_DENSE_TENSOR, MAIN) {
 
 TEST(RL_TOOLS_NN_LAYERS_DENSE_TENSOR, ND_Tensor){
     DEVICE device;
-    auto rng = rlt::random::default_engine(device.random, 0);
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, 0);
     using T = float;
     rlt::Tensor<rlt::tensor::Specification<T, TI, rlt::tensor::Shape<TI, 2, 10, 15>>> tensor;
     rlt::Matrix<rlt::matrix::Specification<T, TI, 20, 15>> matrix;
@@ -69,13 +73,16 @@ template <typename T_CONTENT, typename T_NEXT_MODULE = rlt::nn_models::sequentia
 using Module = typename rlt::nn_models::sequential::Module<T_CONTENT, T_NEXT_MODULE>;
 TEST(RL_TOOLS_NN_LAYERS_DENSE_TENSOR, FORWARD){
     DEVICE device;
-    auto rng = rlt::random::default_engine(device.random, 0);
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, 0);
     using T = double;
+    using TYPE_POLICY = rlt::numeric_types::Policy<T>;
     constexpr TI INPUT_DIM = 10;
     constexpr TI OUTPUT_DIM = 20;
     constexpr TI BATCH_SIZE = 5;
     using INPUT_SHAPE = rlt::tensor::Shape<TI, 1, BATCH_SIZE, INPUT_DIM>;
-    using LAYER_SPEC = rlt::nn::layers::dense::Configuration<T, TI, OUTPUT_DIM, rlt::nn::activation_functions::ActivationFunction::RELU>;
+    using LAYER_SPEC = rlt::nn::layers::dense::Configuration<TYPE_POLICY, TI, OUTPUT_DIM, rlt::nn::activation_functions::ActivationFunction::RELU>;
     using LAYER = rlt::nn::layers::dense::BindConfiguration<LAYER_SPEC>;
     using CAPA = rlt::nn::capability::Gradient<rlt::nn::parameters::Adam>;
 

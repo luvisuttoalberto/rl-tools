@@ -2,12 +2,14 @@
 
 #include <rl_tools/rl/environments/mujoco/ant/operations_cpu.h>
 #include <rl_tools/rl/environments/mujoco/ant/ui.h>
+#include <rl_tools/nn/optimizers/adam/instance/operations_generic.h>
+#include <rl_tools/nn/optimizers/adam/instance/persist.h>
 #include <rl_tools/nn/layers/standardize/operations_generic.h>
+#include <rl_tools/nn/layers/standardize/persist.h>
 #include <rl_tools/nn_models/operations_cpu.h>
 #include <rl_tools/nn_models/mlp_unconditional_stddev/operations_generic.h>
 #include <rl_tools/nn_models/sequential/operations_generic.h>
 #include <rl_tools/nn_models/persist.h>
-#include <rl_tools/nn/layers/standardize/persist.h>
 #include <rl_tools/nn_models/mlp/persist.h>
 #include <rl_tools/nn_models/sequential/persist.h>
 #include <rl_tools/rl/components/running_normalizer/operations_generic.h>
@@ -30,7 +32,9 @@ namespace rlt = RL_TOOLS_NAMESPACE_WRAPPER ::rl_tools;
 
 namespace TEST_DEFINITIONS{
     using DEVICE = rlt::devices::DefaultCPU;
+    using RNG = typename DEVICE::SPEC::RANDOM::ENGINE<>;
     using T = double;
+    using TYPE_POLICY = rlt::numeric_types::Policy<T>;
     using TI = typename DEVICE::index_t;
     namespace parameter_set = parameters_0;
 
@@ -42,7 +46,7 @@ namespace TEST_DEFINITIONS{
     using ENVIRONMENT = rlt::rl::environments::mujoco::Ant<ENVIRONMENT_EVALUATION_SPEC>;
     using UI = rlt::rl::environments::mujoco::ant::UI<ENVIRONMENT>;
 
-    using parameters_rl = parameter_set::rl<T, TI, ENVIRONMENT>;
+    using parameters_rl = parameter_set::rl<TYPE_POLICY, TI, ENVIRONMENT>;
     constexpr TI MAX_EPISODE_LENGTH = 1000;
 }
 
@@ -66,9 +70,10 @@ int main(int argc, char** argv) {
     rlt::Matrix<rlt::matrix::Specification<T, TI, 1, ENVIRONMENT::ACTION_DIM>> action;
     rlt::Matrix<rlt::matrix::Specification<T, TI, 1, ENVIRONMENT::Observation::DIM>> observation;
     typename ENVIRONMENT::State state, next_state;
-    auto rng = rlt::random::default_engine(DEVICE::SPEC::RANDOM(), 10);
-    rlt::rl::components::RunningNormalizer<rlt::rl::components::running_normalizer::Specification<T, TI, ENVIRONMENT::Observation::DIM>> observation_normalizer;
+    RNG rng;
+    rlt::rl::components::RunningNormalizer<rlt::rl::components::running_normalizer::Specification<TYPE_POLICY, TI, ENVIRONMENT::Observation::DIM>> observation_normalizer;
 
+    rlt::malloc(dev, rng);
     rlt::malloc(dev, env);
     rlt::malloc(dev, actor);
     rlt::malloc(dev, actor_buffer);
@@ -76,6 +81,7 @@ int main(int argc, char** argv) {
     rlt::malloc(dev, observation);
     rlt::malloc(dev, observation_normalizer);
 
+    rlt::init(dev, rng, 0);
     rlt::init(dev, env, env_parameters, ui);
     rlt::init(dev, observation_normalizer);
     DEVICE::index_t episode_i = 0;
@@ -115,10 +121,12 @@ int main(int argc, char** argv) {
         {
             try{
                 auto data_file = HighFive::File(checkpoint, HighFive::File::ReadOnly);
-                rlt::load(dev, actor, data_file.getGroup("actor"));
+                auto group = rlt::get_group(dev, data_file, "actor");
+                rlt::load(dev, actor, group);
 #ifdef RL_TOOLS_TEST_RL_ENVIRONMENTS_MUJOCO_ANT_EVALUATE_ACTOR_PPO
-                rlt::load(dev, observation_normalizer.mean, data_file.getGroup("observation_normalizer"), "mean");
-                rlt::load(dev, observation_normalizer.std, data_file.getGroup("observation_normalizer"), "std");
+                auto obsnorm_group = rlt::get_group(dev, data_file, "observation_normalizer");
+                rlt::load(dev, observation_normalizer.mean, obsnorm_group, "mean");
+                rlt::load(dev, observation_normalizer.std, obsnorm_group, "std");
 #endif
             }
             catch(HighFive::FileException& e){

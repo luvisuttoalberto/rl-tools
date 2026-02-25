@@ -5,27 +5,38 @@
 #include "../../nn/parameters/persist.h"
 #include "../../nn/persist.h"
 #include "network.h"
-
-#include <highfive/H5Group.hpp>
-
 #include "../mlp/persist.h"
 
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools{
-    template<typename DEVICE, typename SPEC>
-    void save(DEVICE& device, nn_models::mlp_unconditional_stddev::NeuralNetworkForward<SPEC>& network, HighFive::Group group) {
+    template<typename DEVICE, typename SPEC, template <typename> typename BASE, typename GROUP>
+    void save(DEVICE& device, nn_models::mlp_unconditional_stddev::NeuralNetworkForward<SPEC, BASE>& network, GROUP& group) {
         save(device, static_cast<nn_models::mlp::NeuralNetworkForward<SPEC>&>(network), group);
-        save(device, network.log_std, group.createGroup("log_std"));
+        auto log_std_group = create_group(device, group, "log_std");
+        save(device, network.log_std, log_std_group);
     }
-    template<typename DEVICE, typename SPEC>
-    void load(DEVICE& device, nn_models::mlp_unconditional_stddev::NeuralNetworkForward<SPEC>& network, HighFive::Group group){
-        load(device, static_cast<nn_models::mlp::NeuralNetworkForward<SPEC>&>(network), group);
-        load(device, network.log_std, group.createGroup("log_std"));
+    template<typename DEVICE, typename SPEC, template <typename> typename BASE, typename GROUP>
+    void save(DEVICE& device, nn_models::mlp_unconditional_stddev::NeuralNetworkBackward<SPEC, BASE>& network, GROUP& group){
+        save(device, static_cast<nn_models::mlp_unconditional_stddev::NeuralNetworkForward<SPEC, BASE>&>(network), group);
     }
-    template<typename DEVICE, typename SPEC>
-    void load(DEVICE& device, nn_models::mlp_unconditional_stddev::NeuralNetworkForward<SPEC>& network, std::string file_path){
-        auto file = HighFive::File(file_path, HighFive::File::ReadOnly);
-        load(device, network, file.getGroup("mlp"));
+    template<typename DEVICE, typename SPEC, template <typename> typename BASE, typename GROUP>
+    void save(DEVICE& device, nn_models::mlp_unconditional_stddev::NeuralNetworkGradient<SPEC, BASE>& network, GROUP& group){
+        save(device, static_cast<nn_models::mlp_unconditional_stddev::NeuralNetworkBackward<SPEC, BASE>&>(network), group);
+    }
+    template<typename DEVICE, typename SPEC, template <typename> typename BASE, typename GROUP>
+    bool load(DEVICE& device, nn_models::mlp_unconditional_stddev::NeuralNetworkForward<SPEC, BASE>& network, GROUP& group){
+        bool success = load(device, static_cast<nn_models::mlp::NeuralNetworkForward<SPEC>&>(network), group);
+        auto log_std_group = get_group(device, group, "log_std");
+        success &= load(device, network.log_std, log_std_group);
+        return success;
+    }
+    template<typename DEVICE, typename SPEC, template <typename> typename BASE, typename GROUP>
+    bool load(DEVICE& device, nn_models::mlp_unconditional_stddev::NeuralNetworkBackward<SPEC, BASE>& network, GROUP& group){
+        return load(device, static_cast<nn_models::mlp_unconditional_stddev::NeuralNetworkForward<SPEC, BASE>&>(network), group);
+    }
+    template<typename DEVICE, typename SPEC, template <typename> typename BASE, typename GROUP>
+    bool load(DEVICE& device, nn_models::mlp_unconditional_stddev::NeuralNetworkGradient<SPEC, BASE>& network, GROUP& group){
+        return load(device, static_cast<nn_models::mlp_unconditional_stddev::NeuralNetworkBackward<SPEC, BASE>&>(network), group);
     }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END

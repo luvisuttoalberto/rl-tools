@@ -2,11 +2,8 @@
 //#include <rl_tools/operations/dummy.h>
 
 
-#include <rl_tools/nn_models/models.h>
-
-
 #include <rl_tools/nn/optimizers/adam/instance/operations_generic.h>
-#include <rl_tools/nn/operations_cpu.h>
+#include <rl_tools/nn/layers/dense/operations_cpu.h>
 #include <rl_tools/nn_models/mlp/operations_generic.h>
 #include <rl_tools/nn/optimizers/adam/operations_generic.h>
 
@@ -26,6 +23,7 @@ typedef double T;
 
 using DEVICE = rlt::devices::DefaultCPU;
 using TI = typename DEVICE::index_t;
+using TYPE_POLICY = rlt::numeric_types::Policy<T>;
 //template <typename T_T>
 //struct StructureSpecification{
 //    typedef T_T T;
@@ -40,10 +38,10 @@ using TI = typename DEVICE::index_t;
 constexpr TI BATCH_SIZE = 32;
 constexpr TI INTERNAL_BATCH_SIZE = 1;
 using INPUT_SHAPE = rlt::tensor::Shape<TI, 1, 1, 17>; // actual batch size is 1
-using NETWORK_CONFIG = rlt::nn_models::mlp::Configuration<T, DEVICE::index_t, 13, 3, 50, rlt::nn::activation_functions::GELU, rlt::nn::activation_functions::IDENTITY>;
+using NETWORK_CONFIG = rlt::nn_models::mlp::Configuration<TYPE_POLICY, DEVICE::index_t, 13, 3, 50, rlt::nn::activation_functions::GELU, rlt::nn::activation_functions::IDENTITY>;
 
 
-using OPTIMIZER_PARAMETERS = rlt::nn::optimizers::adam::Specification<T, typename DEVICE::index_t>;
+using OPTIMIZER_PARAMETERS = rlt::nn::optimizers::adam::Specification<TYPE_POLICY, typename DEVICE::index_t>;
 using OPTIMIZER = rlt::nn::optimizers::Adam<OPTIMIZER_PARAMETERS>;
 using CAPABILITY_ADAM = rlt::nn::capability::Gradient<rlt::nn::parameters::Adam, INTERNAL_BATCH_SIZE>;
 using NetworkType = rlt::nn_models::mlp::NeuralNetwork<NETWORK_CONFIG, CAPABILITY_ADAM, INPUT_SHAPE>;
@@ -63,7 +61,7 @@ constexpr typename DEVICE::index_t OUTPUT_DIM = rlt::get_last(typename NetworkTy
 TEST(RL_TOOLS_NN_MLP_FULL_TRAINING, FULL_TRAINING) {
     // loading data
     std::string DATA_FILE_NAME = "mlp_data.hdf5";
-    const char *data_path_stub = RL_TOOLS_MACRO_TO_STR(RL_TOOLS_TESTS_DATA_PATH);
+    const char *data_path_stub = RL_TOOLS_MACRO_TO_STR(RL_TOOLS_TEST_DATA_PATH);
     std::string DATA_FILE_PATH = std::string(data_path_stub) + "/" + DATA_FILE_NAME;
 
     auto data_file = HighFive::File(DATA_FILE_PATH, HighFive::File::ReadOnly);
@@ -83,6 +81,7 @@ TEST(RL_TOOLS_NN_MLP_FULL_TRAINING, FULL_TRAINING) {
     OPTIMIZER optimizer;
     NetworkType network;
     typename NetworkType::Buffer<> buffers;
+    rlt::malloc(device, optimizer);
     rlt::malloc(device, network);
     rlt::malloc(device, buffers);
     std::vector<T> losses;
@@ -90,9 +89,12 @@ TEST(RL_TOOLS_NN_MLP_FULL_TRAINING, FULL_TRAINING) {
     std::vector<T> epoch_durations;
     constexpr TI n_epochs = 3;
     //    this->reset();
+    rlt::init(device, optimizer);
     rlt::reset_optimizer_state(device, optimizer, network);
 //    typename DEVICE::index_t rng = 2;
-    std::mt19937 rng(2);
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, 2);
     rlt::init_weights(device, network, rng);
 
     TI n_iter = X_train.size() / BATCH_SIZE;

@@ -13,7 +13,7 @@ RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools {
     namespace nn::layers::sample_and_squash::persist_code{
         template<typename DEVICE, typename SPEC>
-            rl_tools::persist::Code finish(DEVICE& device, nn::layers::sample_and_squash::LayerForward<SPEC> &layer, std::string name, rl_tools::persist::Code input, bool const_declaration=false, typename DEVICE::index_t indent=0){
+            rl_tools::persist::Code finish(DEVICE& device, nn::layers::sample_and_squash::LayerForward<SPEC> &layer, std::string name, rl_tools::persist::Code input, bool const_declaration=true, typename DEVICE::index_t indent=0){
             using TI = typename DEVICE::index_t;
             std::stringstream indent_ss;
             for(TI i=0; i < indent; i++){
@@ -25,10 +25,9 @@ namespace rl_tools {
             ss_header << input.header;
             ss_header << "#include <rl_tools/nn/layers/sample_and_squash/layer.h>\n";
             ss << input.body;
-            std::string T_string = containers::persist::get_type_string<typename SPEC::T>();
             std::string TI_string = containers::persist::get_type_string<typename SPEC::TI>();
             ss << ind << "namespace " << name << " {\n";
-            std::string T_parameter_string = containers::persist::get_type_string<typename SPEC::T>();
+            std::string T_parameter_string = containers::persist::get_type_string<typename SPEC::TYPE_POLICY::DEFAULT>();
             ss << ind << "    using PARAMETERS = " << "struct PARAMETERS{";
             ss << ind << "        static constexpr " << T_parameter_string << " LOG_STD_LOWER_BOUND = " << SPEC::PARAMETERS::LOG_STD_LOWER_BOUND << ";\n";
             ss << ind << "        static constexpr " << T_parameter_string << " LOG_STD_UPPER_BOUND = " << SPEC::PARAMETERS::LOG_STD_UPPER_BOUND << ";\n";
@@ -38,14 +37,15 @@ namespace rl_tools {
             ss << ind << "        static constexpr " << T_parameter_string << " ALPHA = " << SPEC::PARAMETERS::ALPHA << ";\n";
             ss << ind << "        static constexpr " << T_parameter_string << " TARGET_ENTROPY = " << SPEC::PARAMETERS::TARGET_ENTROPY << ";\n";
             ss << ind << "    };\n";
+            ss << ind << "    using TYPE_POLICY = " + to_string(typename SPEC::TYPE_POLICY{}) + ";\n";
             ss << ind << "    using CONFIG = " << "RL_TOOLS""_NAMESPACE_WRAPPER ::rl_tools::nn::layers::sample_and_squash::Configuration<";
-            ss << T_string << ", ";
+            ss << "TYPE_POLICY, ";
             ss << TI_string << ", ";
             ss << "PARAMETERS";
             ss << ">; \n";;
             ss << ind << "    " << "using TEMPLATE = RL_TOOLS""_NAMESPACE_WRAPPER ::rl_tools::nn::layers::sample_and_squash::BindConfiguration<CONFIG>;" << "\n";
             ss << ind << "    " << "using INPUT_SHAPE = RL_TOOLS""_NAMESPACE_WRAPPER ::rl_tools::tensor::Shape<" << TI_string << ", " << get<0>(typename SPEC::INPUT_SHAPE{}) << ", " << get<1>(typename SPEC::INPUT_SHAPE{}) << ", " << get<2>(typename SPEC::INPUT_SHAPE{}) << ">;\n";
-            ss << ind << "    " << "using CAPABILITY = " << to_string(typename SPEC::CAPABILITY{}) << ";" << "\n";
+            ss << ind << "    " << "using CAPABILITY = " << to_string(typename SPEC::CAPABILITY::template CHANGE_PARAMETERS<true, true>{}) << ";" << "\n";
             ss << ind << "    " << "using TYPE = RL_TOOLS""_NAMESPACE_WRAPPER ::rl_tools::nn::layers::sample_and_squash::Layer<CONFIG, CAPABILITY, INPUT_SHAPE>;" << "\n";
             std::string initializer_list;
             if constexpr(SPEC::CAPABILITY::TAG == nn::LayerCapability::Forward){
@@ -64,11 +64,11 @@ namespace rl_tools {
                     }
                 }
             }
-            ss << ind << "    " << (const_declaration ? "const " : "") << "TYPE module = " << initializer_list << ";\n";
+            ss << ind << "    " << (const_declaration ? "constexpr " : "") << "TYPE module = " << initializer_list << ";\n";
             ss << ind << "    " << "template <typename T_TYPE = TYPE>" << "\n";
-            ss << ind << "    " << (const_declaration ? "const " : "") << "T_TYPE factory = " << initializer_list << ";" << "\n";
+            ss << ind << "    " << (const_declaration ? "constexpr " : "") << "T_TYPE factory = " << initializer_list << ";" << "\n";
             ss << ind << "    " << "template <typename T_TYPE = TYPE>" << "\n";
-            ss << ind << "    " << (const_declaration ? "const " : "") << "T_TYPE factory_function(){return T_TYPE" << initializer_list << ";" << "}\n";
+            ss << ind << "    " << (const_declaration ? "constexpr " : "") << "T_TYPE factory_function(){return T_TYPE" << initializer_list << ";" << "}\n";
             ss << ind << "}\n";
 
 
@@ -76,7 +76,7 @@ namespace rl_tools {
         }
     }
     template<typename DEVICE, typename SPEC>
-    persist::Code save_code_split(DEVICE& device, nn::layers::sample_and_squash::LayerForward<SPEC> &layer, std::string name, bool const_declaration=false, typename DEVICE::index_t indent=0, bool finish=true){
+    persist::Code save_code_split(DEVICE& device, nn::layers::sample_and_squash::LayerForward<SPEC> &layer, std::string name, bool const_declaration=true, typename DEVICE::index_t indent=0, bool finish=true){
         if(finish){
             return nn::layers::sample_and_squash::persist_code::finish(device, layer, name, {"", ""}, const_declaration, indent);
         }
@@ -85,7 +85,7 @@ namespace rl_tools {
         }
     }
     template<typename DEVICE, typename SPEC>
-    persist::Code save_code_split(DEVICE& device, nn::layers::sample_and_squash::LayerBackward<SPEC> &layer, std::string name, bool const_declaration=false, typename DEVICE::index_t indent=0, bool finish=true){
+    persist::Code save_code_split(DEVICE& device, nn::layers::sample_and_squash::LayerBackward<SPEC> &layer, std::string name, bool const_declaration=true, typename DEVICE::index_t indent=0, bool finish=true){
         using TI = typename DEVICE::index_t;
         std::stringstream indent_ss;
         for(TI i=0; i < indent; i++){
@@ -118,7 +118,7 @@ namespace rl_tools {
     }
 
     template<typename DEVICE, typename SPEC>
-    persist::Code save_code_split(DEVICE& device, nn::layers::sample_and_squash::LayerGradient<SPEC> &layer, std::string name, bool const_declaration=false, typename DEVICE::index_t indent=0){
+    persist::Code save_code_split(DEVICE& device, nn::layers::sample_and_squash::LayerGradient<SPEC> &layer, std::string name, bool const_declaration=true, typename DEVICE::index_t indent=0){
         using TI = typename DEVICE::index_t;
         std::stringstream indent_ss;
         for(TI i=0; i < indent; i++){
@@ -151,9 +151,21 @@ namespace rl_tools {
     }
 
     template<typename DEVICE, typename SPEC>
-    std::string save_code(DEVICE& device, nn::layers::sample_and_squash::LayerForward<SPEC> &layer, std::string name, bool const_declaration=false, typename DEVICE::index_t indent=0){
+    std::string save_code(DEVICE& device, nn::layers::sample_and_squash::LayerForward<SPEC> &layer, std::string name, bool const_declaration=true, typename DEVICE::index_t indent=0){
         auto code = save_code_split(device, layer, name, const_declaration, indent);
         return code.header + code.body;
+    }
+    template <typename DEVICE, typename SPEC>
+    std::string nn_analytics(DEVICE& device, nn::layers::sample_and_squash::LayerGradient<SPEC>& layer) {
+        std::string data;
+        data += "{";
+        data += "\"log_alpha\": " + nn_analytics(device, layer.log_alpha) + ", ";
+        data += "\"pre_squashing\": " + json(device, layer.pre_squashing) + ", ";
+        data += "\"noise\": " + json(device, layer.noise) + ", ";
+        data += "\"log_probabilities\": " + json(device, layer.log_probabilities) + ", ";
+        data += "\"output\": " + json(device, layer.output);
+        data += "}";
+        return data;
     }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END

@@ -20,11 +20,11 @@ void check(DEVICE& device, const OBJECT& object, std::string name){
 #include <rl_tools/nn/layers/gru/operations_generic.h>
 #include <rl_tools/nn/layers/sample_and_squash/operations_generic.h>
 #include <rl_tools/rl/environments/l2f/operations_cpu.h>
-#include <rl_tools/rl/environments/l2f/parameters/reward_functions/squared.h>
+#include <rl_tools/rl/environments/l2f/parameters/reward_functions/squared/operations_generic.h>
 #include <rl_tools/rl/environments/l2f/parameters/reward_functions/default.h>
 #include <rl_tools/rl/environments/l2f/parameters/default.h>
 #include <rl_tools/rl/environments/l2f/parameters/dynamics/crazyflie.h>
-#include <rl_tools/rl/environments/l2f/parameters/dynamics/race.h>
+#include <rl_tools/rl/environments/l2f/parameters/dynamics/arpl.h>
 #include <rl_tools/rl/environments/l2f/parameters/dynamics/x500_sim.h>
 #include <rl_tools/rl/environments/l2f/parameters/dynamics/x500_real.h>
 #include <rl_tools/rl/environments/l2f/parameters/init/default.h>
@@ -36,8 +36,8 @@ void check(DEVICE& device, const OBJECT& object, std::string name){
 #include <rl_tools/nn/optimizers/adam/operations_generic.h>
 
 #ifdef RL_TOOLS_ENABLE_HDF5
-#include <rl_tools/containers/matrix/persist.h>
-#include <rl_tools/containers/tensor/persist.h>
+
+
 #include <rl_tools/nn/optimizers/adam/instance/persist.h>
 #include <rl_tools/nn/layers/sample_and_squash/persist.h>
 #include <rl_tools/nn/layers/standardize/persist.h>
@@ -62,8 +62,9 @@ namespace rlt = rl_tools;
 
 
 using DEVICE = rlt::devices::DEVICE_FACTORY<>;
-using RNG = decltype(rlt::random::default_engine(typename DEVICE::SPEC::RANDOM{}));
+using RNG = DEVICE::SPEC::RANDOM::ENGINE<>;
 using T = float;
+using TYPE_POLICY = rlt::numeric_types::Policy<T>;
 using TI = typename DEVICE::index_t;
 
 #include "parameters.h"
@@ -77,17 +78,19 @@ int main(){
     TI seed = 1;
     DEVICE device;
     LOOP_STATE ts;
-    ts.extrack_name = "sequential";
-    ts.extrack_population_variates = "algorithm_environment_seq-len";
-    ts.extrack_population_values = std::string("sac_l2f_") + std::to_string(SEQUENCE_LENGTH);
+    ts.extrack_config.name = "sequential";
+    ts.extrack_config.population_variates = "algorithm_environment_seq-len";
+    ts.extrack_config.population_values = std::string("sac_l2f_") + std::to_string(SEQUENCE_LENGTH);
     rlt::malloc(device);
     rlt::init(device);
     rlt::malloc(device, ts);
     rlt::init(device, ts, seed);
     std::cout << "Sizeof training state: " << sizeof(ts) << std::endl;
-    auto myrng = rlt::random::default_engine(device.random, seed);
+    DEVICE::SPEC::RANDOM::ENGINE<> myrng;
+    rlt::malloc(device, myrng);
+    rlt::init(device, myrng, 0);
 #ifdef RL_TOOLS_ENABLE_TENSORBOARD
-    rlt::init(device, device.logger, ts.extrack_seed_path);
+    rlt::init(device, device.logger, ts.extrack_paths.seed);
 #endif
     bool done = false;
     while(!done){

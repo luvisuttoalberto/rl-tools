@@ -10,12 +10,13 @@ namespace rlt = rl_tools;
 using DEVICE = rlt::devices::DefaultCPU;
 using TI = typename DEVICE::index_t;
 using T = double;
+using TYPE_POLICY = rlt::numeric_types::Policy<T>;
 
 constexpr TI BATCH_SIZE = 1;
 using INPUT_SHAPE = rlt::tensor::Shape<TI, 1, BATCH_SIZE, 13>;
-using CONFIG = rlt::nn_models::mlp::Configuration<T, TI, 12, 3, 5, rlt::nn::activation_functions::RELU, rlt::nn::activation_functions::IDENTITY>;
+using CONFIG = rlt::nn_models::mlp::Configuration<TYPE_POLICY, TI, 12, 3, 5, rlt::nn::activation_functions::RELU, rlt::nn::activation_functions::IDENTITY>;
 
-using OPTIMIZER_SPEC = rlt::nn::optimizers::adam::Specification<T, TI>;
+using OPTIMIZER_SPEC = rlt::nn::optimizers::adam::Specification<TYPE_POLICY, TI>;
 using OPTIMIZER = rlt::nn::optimizers::Adam<OPTIMIZER_SPEC>;
 using CAPABILITY_ADAM_DYNAMIC = rlt::nn::capability::Gradient<rlt::nn::parameters::Adam, true>;
 using CAPABILITY_ADAM_STATIC = rlt::nn::capability::Gradient<rlt::nn::parameters::Adam, false>;
@@ -25,7 +26,9 @@ using MLP_STATIC = rlt::nn_models::mlp::NeuralNetwork<CONFIG, CAPABILITY_ADAM_ST
 
 TEST(RL_TOOLS_NN_MODELS_MLP, STATIC){
     DEVICE device;
-    auto rng = rlt::random::default_engine(device.random, 0);
+    DEVICE::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, 0);
 
     MLP_DYNAMIC mlp_dynamic;
     MLP_DYNAMIC::Buffer<true> mlp_dynamic_buffer;
@@ -33,9 +36,14 @@ TEST(RL_TOOLS_NN_MODELS_MLP, STATIC){
     MLP_STATIC::Buffer<true> mlp_static_buffer;
     OPTIMIZER optimizer_dynamic, optimizer_static;
 
+    rlt::malloc(device, optimizer_dynamic);
+    rlt::malloc(device, optimizer_static);
     rlt::malloc(device, mlp_dynamic);
     rlt::malloc(device, mlp_dynamic_buffer);
     rlt::malloc(device, mlp_static_buffer);
+
+    rlt::init(device, optimizer_dynamic);
+    rlt::init(device, optimizer_static);
 
     rlt::init_weights(device, mlp_dynamic, rng);
 
