@@ -30,8 +30,10 @@ RL_TOOLS_FUNCTION_PLACEMENT static void observe(
     shared_obs[0] = state.disaster_detected_global ? 1 : -1;
     shared_obs[1] = !state.disaster_detected_global ? 10 : 2 * (state.last_detected_disaster_position[0]/PARAMS::GRID_SIZE_X) - 1;
     shared_obs[2] = !state.disaster_detected_global ? 10 : 2 * (state.last_detected_disaster_position[1]/PARAMS::GRID_SIZE_Y) - 1;
-    shared_obs[3] = 2 * (state.charging_station_position[0] / PARAMS::GRID_SIZE_X) - 1;
-    shared_obs[4] = 2 * (state.charging_station_position[1] / PARAMS::GRID_SIZE_Y) - 1;
+    if constexpr (PARAMS::ACTOR_OBSERVE_CHARGING_STATION_POSITION) {
+        shared_obs[3] = 2 * (state.charging_station_position[0] / PARAMS::GRID_SIZE_X) - 1;
+        shared_obs[4] = 2 * (state.charging_station_position[1] / PARAMS::GRID_SIZE_Y) - 1;
+    }
 
     for (TI agent_i = 0; agent_i < PARAMS::N_AGENTS; agent_i++) {
         const auto &agent_state = state.drone_states[agent_i];
