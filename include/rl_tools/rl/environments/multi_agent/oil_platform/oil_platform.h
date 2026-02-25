@@ -49,7 +49,11 @@ namespace rl_tools {
                         static constexpr TI GRID_SIZE_Y = 20;
 
                         static constexpr TI GRID_RES = 20;
-
+                        // Grid parameters (derived from GRID_SIZE_* and GRID_RES)
+                        static constexpr T GRID_DX = T(GRID_SIZE_X) / GRID_RES;
+                        static constexpr T GRID_DY = T(GRID_SIZE_Y) / GRID_RES;
+                        static constexpr T GRID_CX = GRID_SIZE_X * T(0.5);
+                        static constexpr T GRID_CY = GRID_SIZE_Y * T(0.5);
 
                         // Episode length
                         static constexpr TI EPISODE_STEP_LIMIT = 1000;
@@ -57,21 +61,24 @@ namespace rl_tools {
                         // Disaster parameters
                         static constexpr T DISASTER_MAX_SPEED = 1.0;
                         static constexpr TI DISASTER_MINIMUM_SPAWN_STEP = 0;
-                        // static constexpr T DISASTER_PROBABILITY_SPAWN = 0.01;
-                        static constexpr T DISASTER_PROBABILITY_SPAWN = 0.;
+                        static constexpr T DISASTER_PROBABILITY_SPAWN = 0.01;
+                        // static constexpr T DISASTER_PROBABILITY_SPAWN = 0.;
 
                         // --- new: stochastic drift controls -----------------------------------------
                         static constexpr T DISASTER_TURN_MAX_RAD       = T(0.10);   // ≤~5.7° yaw jitter/step
                         static constexpr T DISASTER_SPEED_JITTER_FRAC  = T(0.10);   // ±10% fractional speed jitter
 // ----------------------------------------------------------------------------
                         static constexpr bool DISASTER_REWARD_SWITCH_ON_DETECTION = true;
+                        // During disaster reward phase, agents not currently detecting the disaster
+                        // receive maximum coverage penalty (via zero coverage contribution).
+                        static constexpr bool DISASTER_FORCE_MAX_PENALTY_IF_NOT_DETECTING = false;
 
                         // Charging parameters
                         static constexpr T CHARGING_RATE = 1.0;
 //                        static constexpr T DISCHARGE_RATE = 0.15;
                         static constexpr T CHARGING_STATION_RANGE = 2.0;
                         static constexpr T CHARGING_VELOCITY_THRESHOLD = 0.75;
-                        static constexpr bool RANDOMIZE_CHARGING_STATION_POSITION = true;
+                        static constexpr bool RANDOMIZE_CHARGING_STATION_POSITION = false;
                         static constexpr T CHARGING_STATION_POSITION_X = 5.0;
                         static constexpr T CHARGING_STATION_POSITION_Y = 5.0;
                         static constexpr T MINIMUM_BATTERY_FOR_CHARGING = 80.0;
@@ -90,7 +97,7 @@ namespace rl_tools {
 
 
                         static constexpr T GAUSS_SIGMA_COVER = SENSOR_RANGE/2;          // pre-disaster
-                        static constexpr T GAUSS_SIGMA_EVENT = SENSOR_RANGE/2;    // post-spawn
+                        static constexpr T GAUSS_SIGMA_EVENT = SENSOR_RANGE/3;    // post-spawn
                         static constexpr T GAUSS_BETA_COVER        = 1.0;   //Coverage reward
                         static constexpr T GAUSS_BETA_EVENT        = 1.0;  // Disaster detection reward
                         
@@ -115,11 +122,39 @@ namespace rl_tools {
                         static constexpr TI MINIMUM_COVERAGE_STEPS = 100;  // Minimum steps before disaster to count as valid coverage episode
 
                         // Battery and charging parameters
-                        static constexpr T DISCHARGE_RATE = 0.15;
-                        static constexpr T GAUSS_SIGMA_CHARGING = CHARGING_STATION_RANGE*2;
+                        static constexpr T DISCHARGE_RATE_BASE = T(0.15);
+                        static constexpr T GAUSS_SIGMA_CHARGING = CHARGING_STATION_RANGE;
                         static constexpr T GAUSS_BETA_CHARGING = 1.0;
+                        static constexpr T CHARGING_SHAPING_SCALE = T(1.0);
+                        // Charging objective selector:
+                        // 0 -> legacy Gaussian proximity shaping
+                        // 1 -> non-spatial battery risk penalty only
+                        // 2 -> non-spatial battery risk + charging event terms
+                        static constexpr TI CHARGING_OBJECTIVE_VARIANT = 1;
+                        static constexpr bool CHARGING_SHAPING_GATE_ENABLED = false;
+                        // Coverage toggle: ignore charging agents when computing coverage
+                        static constexpr bool EXCLUDE_CHARGING_FROM_COVERAGE = true;
+                        // Actor-only toggle: include charging station position in observations
+                        static constexpr bool ACTOR_OBSERVE_CHARGING_STATION_POSITION = true;
+                        // Hard gate for charging shaping (normalized battery in [0,1])
+                        static constexpr T CHARGING_SHAPING_BATTERY_THRESHOLD = T(0.75);
+                        // Non-linear ramp exponent for charging urgency below threshold
+                        static constexpr T CHARGING_URGENCY_RAMP_POWER = T(2.0);
                         static constexpr T BATTERY_URGENCY_K = 1.0;
+                        // Non-spatial battery-risk shaping parameters (variants 1 and 2)
+                        static constexpr T BATTERY_RISK_WARNING_THRESHOLD = T(0.45);
+                        static constexpr T BATTERY_RISK_EXPONENT = T(2.0);
+                        static constexpr T BATTERY_RISK_PENALTY_WEIGHT = T(0.4);
+                        // Charging-event shaping parameters (variant 2)
+                        static constexpr T CHARGING_EVENT_HIGH_THRESHOLD = T(0.75);
+                        static constexpr T CHARGING_EVENT_CRITICAL_THRESHOLD = T(0.20);
+                        static constexpr T CHARGING_EVENT_OK_THRESHOLD = T(0.50);
+                        static constexpr T CHARGING_EVENT_EARLY_PENALTY = T(0.6);
+                        static constexpr T CHARGING_EVENT_LATE_PENALTY = T(1.2);
+                        static constexpr T CHARGING_EVENT_GOOD_BONUS = T(0.2);
                         static constexpr T DEATH_PENALTY = -10.0;
+                        // If true, drones can die before battery reaches 0 when they can no longer reach charger.
+                        static constexpr bool POINT_OF_NO_RETURN_DEATH_ENABLED = false;
                         
                         // Movement cost parameters
                         static constexpr T MOVEMENT_COST_COEFFICIENT = 0.;  // Cost per unit of speed
@@ -138,18 +173,6 @@ namespace rl_tools {
 // κ = 0.5  ⇒ place arm centers roughly midway from platform edge to boundary.
                         static constexpr T PIPE_CENTER_FRACTION = T(0.5);
 
-// Gaussian widths (tune as you like)
-//                        static constexpr T SIGMA_PLATFORM     = T(0.9)  * PLATFORM_HALF_SIZE;             // round
-//                        static constexpr T SIGMA_PIPE_LONG_X  = T(0.55) * (WORLD_HALF_X - PLATFORM_HALF_SIZE);
-//                        static constexpr T SIGMA_PIPE_LONG_Y  = T(0.55) * (WORLD_HALF_Y - PLATFORM_HALF_SIZE);
-//                        static constexpr T SIGMA_PIPE_SHORT   = T(0.35) * PIPE_WIDTH;                     // across pipe
-
-                        // // Gaussian widths (tune as you like)
-                        // static constexpr T SIGMA_PLATFORM     = T(1.4)  * PLATFORM_HALF_SIZE;             // round
-                        // static constexpr T SIGMA_PIPE_LONG_X  = T(0.75) * (WORLD_HALF_X - PLATFORM_HALF_SIZE);
-                        // static constexpr T SIGMA_PIPE_LONG_Y  = T(0.75) * (WORLD_HALF_Y - PLATFORM_HALF_SIZE);
-                        // static constexpr T SIGMA_PIPE_SHORT   = T(0.60) * PIPE_WIDTH;                     // across pipe
-
                         // Gaussian widths (tune as you like)
                         static constexpr T SIGMA_PLATFORM     = T(0.8)  * PLATFORM_HALF_SIZE;             // round
                         static constexpr T SIGMA_PIPE_LONG_X  = T(0.4) * (WORLD_HALF_X - PLATFORM_HALF_SIZE);
@@ -165,12 +188,6 @@ namespace rl_tools {
 // Aggregation: hard max by default (no overlap boost).
 // If you want smoothness, set TAU > 0 and use softmax in the evaluator.
                         static constexpr T MULTIGAUSS_SOFTMAX_TAU = T(0.5);   // 0 ⇒ hard max, >0 ⇒ softmax
-
-                        // Hysteresis thresholds on normalized battery b01 = battery/100
-                        static constexpr T B_ON         = T(0.30);  // engage while at pad if b01 <= B_ON
-                        static constexpr T B_OFF        = T(0.75);  // release when b01 >= B_OFF
-                        static constexpr T B_SMOOTH_ON  = T(0.06);  // slope width around B_ON
-                        static constexpr T B_SMOOTH_OFF = T(0.06);  // slope width around B_OFF
 
 
 
@@ -276,13 +293,13 @@ namespace rl_tools {
                         static constexpr TI PER_AGENT_DIM = 8; // pos(2), vel(2), battery (1), dead (1), is_charging (1), is_detecting(1)
                         static constexpr TI PER_OTHER_AGENT_DIM = 6; // pos(2), vel(2), battery(1), is_charging(1) - per other agent
                         static constexpr TI OTHER_AGENTS_DIM = (PARAMETERS::N_AGENTS - 1) * PER_OTHER_AGENT_DIM; // observations of all other agents
-                        static constexpr TI SHARED_DIM = 5; // last_detected_disaster_pos(2), charging_station_pos(2), disaster_detected_global (1)
-                        static constexpr TI PER_AGENT_TOTAL_DIM = PER_AGENT_DIM + OTHER_AGENTS_DIM + SHARED_DIM; // 8 + (N-1)*6 + 5 per agent
-                        static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_TOTAL_DIM; // N * (8 + (N-1)*6 + 5) (divisible by N)
+                        static constexpr TI SHARED_DIM = PARAMETERS::ACTOR_OBSERVE_CHARGING_STATION_POSITION ? 5 : 3;
+                        static constexpr TI PER_AGENT_TOTAL_DIM = PER_AGENT_DIM + OTHER_AGENTS_DIM + SHARED_DIM; // 8 + (N-1)*6 + shared per agent
+                        static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_TOTAL_DIM; // N * (8 + (N-1)*6 + shared)
 #else
                         // SAC-friendly layout: all agents' blocks concatenated, then shared info once
                         static constexpr TI PER_AGENT_DIM = 8; // pos(2), vel(2), is_detecting(1), battery(1), dead(1), is_charging(1)
-                        static constexpr TI SHARED_DIM = 5; // disaster_detected flag, last_detected_disaster_pos(2), charging_station_pos(2)
+                        static constexpr TI SHARED_DIM = PARAMETERS::ACTOR_OBSERVE_CHARGING_STATION_POSITION ? 5 : 3;
                         static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_DIM + SHARED_DIM; // concatenated per-agent blocks + shared info
 #endif
                     };
@@ -307,10 +324,6 @@ namespace rl_tools {
                         bool is_detecting;
 
                         // New grid tracking fields
-//                        TI current_grid_x;
-//                        TI current_grid_y;
-//                        TI steps_in_current_cell;
-//                        bool charge_latch;   // committed-to-charging memory
                         TI charge_hold_remaining;  // counts down while locked to the charger
 
                     };
@@ -339,6 +352,17 @@ namespace rl_tools {
                         // New metrics for multiple disasters
                         TI total_disasters_spawned;
                         TI disasters_missed;  // Disasters that left without detection
+
+                        // Reward components (per-step)
+                        T coverage_penalty;
+                        T charging_penalty;
+                        T battery_risk_penalty;
+                        T charging_event_penalty;
+                        T repulsion_penalty;
+                        T abandonment_penalty;
+                        T death_penalty;
+                        T ongoing_death_penalty;
+                        T movement_penalty;
 
                         T per_step_reward;
                     };
