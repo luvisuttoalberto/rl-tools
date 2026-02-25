@@ -23,8 +23,8 @@ namespace rl_tools::rl::zoo::oil_platform_v1::sac {
                 static constexpr TI SEQUENCE_LENGTH = 1;
                 static constexpr bool ENTROPY_BONUS_NEXT_STEP = false;
             };
-            static constexpr TI STEP_LIMIT = 5000000;
-            static constexpr TI REPLAY_BUFFER_CAP = 5000000;
+            static constexpr TI STEP_LIMIT = 10000000;
+            static constexpr TI REPLAY_BUFFER_CAP = 10000000;
             static constexpr TI ACTOR_NUM_LAYERS = 3;
             static constexpr TI ACTOR_HIDDEN_DIM = 128;
             static constexpr auto ACTOR_ACTIVATION_FUNCTION = rlt::nn::activation_functions::ActivationFunction::RELU;
