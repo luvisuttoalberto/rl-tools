@@ -9,8 +9,9 @@
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools::rl::zoo::oil_platform_v1 {
     namespace rlt = rl_tools;
-    template <typename DEVICE, typename T, typename TI, bool USE_PRIVILEGED_CRITIC_OBSERVATION = false>
+    template <typename DEVICE, typename TYPE_POLICY, typename TI, bool USE_PRIVILEGED_CRITIC_OBSERVATION = false>
     struct ENVIRONMENT_FACTORY {
+        using T = typename TYPE_POLICY::DEFAULT;
         using PARAMETERS = rlt::rl::environments::multi_agent::oil_platform::DefaultParameters<T, TI>;
         using OBSERVATION = rlt::rl::environments::multi_agent::oil_platform::Observation<PARAMETERS>;
         using OBSERVATION_PRIVILEGED_RAW = rlt::rl::environments::multi_agent::oil_platform::ObservationPrivileged<PARAMETERS>;

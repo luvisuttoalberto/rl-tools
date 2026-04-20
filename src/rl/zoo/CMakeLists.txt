@@ -180,15 +180,6 @@ target_compile_definitions(rl_zoo_oil_platform-v1_ppo_multi_agent PRIVATE RL_TOO
 target_compile_definitions(rl_zoo_oil_platform-v1_ppo_multi_agent PRIVATE RL_TOOLS_USE_MULTI_AGENT_PPO)
 target_compile_options(rl_zoo_oil_platform-v1_ppo_multi_agent PRIVATE -Ofast -march=native)
 
-# Oil Platform SAC (Hierarchical)
-add_executable(rl_zoo_oil_platform-v1_sac_hierarchical zoo_cli.cpp zoo.cpp)
-target_link_libraries(rl_zoo_oil_platform-v1_sac_hierarchical PRIVATE RLtools::RLtools)
-RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(rl_zoo_oil_platform-v1_sac_hierarchical)
-target_compile_definitions(rl_zoo_oil_platform-v1_sac_hierarchical PRIVATE RL_TOOLS_RL_ZOO_ALGORITHM_SAC)
-target_compile_definitions(rl_zoo_oil_platform-v1_sac_hierarchical PRIVATE RL_TOOLS_RL_ZOO_ENVIRONMENT_OIL_PLATFORM)
-target_compile_definitions(rl_zoo_oil_platform-v1_sac_hierarchical PRIVATE RL_TOOLS_USE_HIERARCHICAL_SAC)
-target_compile_options(rl_zoo_oil_platform-v1_sac_hierarchical PRIVATE -Ofast -march=native)
-
 if(RL_TOOLS_RL_ENVIRONMENTS_ENABLE_MUJOCO)
     # Ant-v4
     # PPO

@@ -1416,35 +1416,56 @@ namespace rl_tools {
         constexpr TI SHARED_DIM = OBS::SHARED_DIM;
         using PARAMS = typename SPEC::PARAMETERS;
         
-        // Pre-compute shared observations once
-        T shared_obs[SHARED_DIM];
-        shared_obs[0] = state.disaster_detected_global ? 1 : -1;
-        shared_obs[1] = !state.disaster_detected_global ? 10 : 2 * (state.last_detected_disaster_position[0]/PARAMS::GRID_SIZE_X) - 1;
-        shared_obs[2] = !state.disaster_detected_global ? 10 : 2 * (state.last_detected_disaster_position[1]/PARAMS::GRID_SIZE_Y) - 1;
-        if constexpr (PARAMS::ACTOR_OBSERVE_CHARGING_STATION_POSITION) {
-            shared_obs[3] = 2 * (state.charging_station_position[0] / PARAMS::GRID_SIZE_X) - 1;
-            shared_obs[4] = 2 * (state.charging_station_position[1] / PARAMS::GRID_SIZE_Y) - 1;
-        }
-        
         for (TI agent_i = 0; agent_i < PARAMS::N_AGENTS; ++agent_i) {
             const auto &agent_state = state.drone_states[agent_i];
             TI offset = agent_i * PER_AGENT_DIM;
-            
-            // Per-agent own observations (8 dimensions)
-            set(observation, 0, offset + 0, 2 * (agent_state.position[0] / PARAMS::GRID_SIZE_X) - 1);  // Normalized position [-1,1]
-            set(observation, 0, offset + 1, 2 * (agent_state.position[1] / PARAMS::GRID_SIZE_Y) - 1);  // Normalized position [-1,1]
-            set(observation, 0, offset + 2, agent_state.dead ? 0 : agent_state.velocity[0] / PARAMS::MAX_SPEED);
-            set(observation, 0, offset + 3, agent_state.dead ? 0 : agent_state.velocity[1] / PARAMS::MAX_SPEED);
-            set(observation, 0, offset + 4, agent_state.dead ? -1 : (agent_state.is_detecting ? 1 : -1));
+
+            // Base 8 per-agent dims (same in both modes)
+            set(observation, 0, offset + 0, 2 * (agent_state.position[0] / PARAMS::GRID_SIZE_X) - 1);
+            set(observation, 0, offset + 1, 2 * (agent_state.position[1] / PARAMS::GRID_SIZE_Y) - 1);
+            set(observation, 0, offset + 2, agent_state.dead ? T(0) : agent_state.velocity[0] / PARAMS::MAX_SPEED);
+            set(observation, 0, offset + 3, agent_state.dead ? T(0) : agent_state.velocity[1] / PARAMS::MAX_SPEED);
+            set(observation, 0, offset + 4, agent_state.dead ? T(-1) : (agent_state.is_detecting ? T(1) : T(-1)));
             set(observation, 0, offset + 5, 2 * (agent_state.battery / 100) - 1);
-            set(observation, 0, offset + 6, agent_state.dead ? 1 : -1);
-            set(observation, 0, offset + 7, agent_state.dead ? -1 : agent_state.is_charging ? 1 : -1);
+            set(observation, 0, offset + 6, agent_state.dead ? T(1) : T(-1));
+            set(observation, 0, offset + 7, agent_state.dead ? T(-1) : (agent_state.is_charging ? T(1) : T(-1)));
+
+            if constexpr (PARAMS::OBSERVE_RELATIVE_POSITIONS) {
+                // Relative disaster displacement (dims 8, 9).
+                // Use 0 when not detected — gated by disaster_detected_global in shared dim 0.
+                const T rel_disaster_x = state.disaster_detected_global
+                    ? (state.last_detected_disaster_position[0] - agent_state.position[0]) / T(PARAMS::GRID_SIZE_X)
+                    : T(10);
+                const T rel_disaster_y = state.disaster_detected_global
+                    ? (state.last_detected_disaster_position[1] - agent_state.position[1]) / T(PARAMS::GRID_SIZE_Y)
+                    : T(10);
+                set(observation, 0, offset + 8, rel_disaster_x);
+                set(observation, 0, offset + 9, rel_disaster_y);
+
+                if constexpr (PARAMS::ACTOR_OBSERVE_CHARGING_STATION_POSITION) {
+                    // Relative charger displacement (dims 10, 11).
+                    const T rel_charger_x = (state.charging_station_position[0] - agent_state.position[0]) / T(PARAMS::GRID_SIZE_X);
+                    const T rel_charger_y = (state.charging_station_position[1] - agent_state.position[1]) / T(PARAMS::GRID_SIZE_Y);
+                    set(observation, 0, offset + 10, rel_charger_x);
+                    set(observation, 0, offset + 11, rel_charger_y);
+                }
+            }
         }
 
-        // Append shared observations once after all agent states
+        // Shared observations appended after all per-agent blocks
         TI shared_offset = PARAMS::N_AGENTS * PER_AGENT_DIM;
-        for (TI shared_i = 0; shared_i < SHARED_DIM; ++shared_i) {
-            set(observation, 0, shared_offset + shared_i, shared_obs[shared_i]);
+        if constexpr (PARAMS::OBSERVE_RELATIVE_POSITIONS) {
+            // Only the detection flag — positions are already encoded per-agent above
+            set(observation, 0, shared_offset + 0, state.disaster_detected_global ? T(1) : T(-1));
+        } else {
+            // Absolute mode: flag + last-known disaster position + optional charger position
+            set(observation, 0, shared_offset + 0, state.disaster_detected_global ? T(1) : T(-1));
+            set(observation, 0, shared_offset + 1, !state.disaster_detected_global ? T(0) : 2 * (state.last_detected_disaster_position[0] / T(PARAMS::GRID_SIZE_X)) - 1);
+            set(observation, 0, shared_offset + 2, !state.disaster_detected_global ? T(0) : 2 * (state.last_detected_disaster_position[1] / T(PARAMS::GRID_SIZE_Y)) - 1);
+            if constexpr (PARAMS::ACTOR_OBSERVE_CHARGING_STATION_POSITION) {
+                set(observation, 0, shared_offset + 3, 2 * (state.charging_station_position[0] / T(PARAMS::GRID_SIZE_X)) - 1);
+                set(observation, 0, shared_offset + 4, 2 * (state.charging_station_position[1] / T(PARAMS::GRID_SIZE_Y)) - 1);
+            }
         }
 
         utils::assert_exit(device, !is_nan(device, observation), "Observation is nan");

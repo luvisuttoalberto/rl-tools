@@ -11,6 +11,13 @@
 
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools {
+    template <typename DEVICE, typename SPEC>
+    std::string json(DEVICE& device, rl::environments::multi_agent::OilPlatform<SPEC>& env) {
+        std::string result = "{";
+        result += "}";
+        return result;
+    }
+
     template<typename DEVICE, typename SPEC>
     struct OilPlatformCPU : public rl::environments::multi_agent::OilPlatform<SPEC> {
         using ENVIRONMENT = rl::environments::multi_agent::OilPlatform<SPEC>;

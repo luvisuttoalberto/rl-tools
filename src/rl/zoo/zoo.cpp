@@ -93,7 +93,6 @@
 #include "l2f/td3.h"
 #include "l2f/ppo.h"
 #include "oil_platform-v1/sac.h"
-#include "oil_platform-v1/sac_hierarchical.h"
 #include "oil_platform-v1/ppo_multi_agent.h"
 #ifdef RL_TOOLS_RL_ZOO_ENVIRONMENT_ANT_V4
 #include "ant-v4/ppo.h"
@@ -182,14 +181,10 @@ using LOOP_CORE_CONFIG = rlt::rl::zoo::l2f::sac::FACTORY<DEVICE, TYPE_POLICY, TI
 template <typename BASE>
 struct LOOP_EVALUATION_PARAMETER_OVERWRITES: BASE{};
 #elif defined(RL_TOOLS_RL_ZOO_ENVIRONMENT_OIL_PLATFORM)
-#ifdef RL_TOOLS_USE_HIERARCHICAL_SAC
-using LOOP_CORE_CONFIG = rlt::rl::zoo::oil_platform_v1::sac_hierarchical::FACTORY<DEVICE, T, TI, RNG>::LOOP_CORE_CONFIG;
-//#elif defined(RL_TOOLS_USE_MULTI_AGENT_SAC)
-//using LOOP_CORE_CONFIG = rlt::rl::zoo::oil_platform_v1::sac_multi_agent::FACTORY<DEVICE, T, TI, RNG>::LOOP_CORE_CONFIG;
-#elif defined(RL_TOOLS_USE_MULTI_AGENT_PPO)
-using LOOP_CORE_CONFIG = rlt::rl::zoo::oil_platform_v1::ppo_multi_agent::FACTORY<DEVICE, T, TI, RNG>::LOOP_CORE_CONFIG;
+#if defined(RL_TOOLS_USE_MULTI_AGENT_PPO)
+using LOOP_CORE_CONFIG = rlt::rl::zoo::oil_platform_v1::ppo_multi_agent::FACTORY<DEVICE, TYPE_POLICY, TI, RNG>::LOOP_CORE_CONFIG;
 #else
-using LOOP_CORE_CONFIG = rlt::rl::zoo::oil_platform_v1::sac::FACTORY<DEVICE, T, TI, RNG>::LOOP_CORE_CONFIG;
+using LOOP_CORE_CONFIG = rlt::rl::zoo::oil_platform_v1::sac::FACTORY<DEVICE, TYPE_POLICY, TI, RNG>::LOOP_CORE_CONFIG;
 #endif
 template <typename BASE>
 struct LOOP_EVALUATION_PARAMETER_OVERWRITES: BASE{};
@@ -260,7 +255,7 @@ using LOOP_CORE_CONFIG = rlt::rl::zoo::l2f::ppo::FACTORY<DEVICE, TYPE_POLICY, TI
 template <typename BASE>
 struct LOOP_EVALUATION_PARAMETER_OVERWRITES: BASE{}; // no-op
 #elif defined(RL_TOOLS_RL_ZOO_ENVIRONMENT_OIL_PLATFORM)
-using LOOP_CORE_CONFIG = rlt::rl::zoo::oil_platform_v1::ppo_multi_agent::FACTORY<DEVICE, T, TI, RNG>::LOOP_CORE_CONFIG;
+using LOOP_CORE_CONFIG = rlt::rl::zoo::oil_platform_v1::ppo_multi_agent::FACTORY<DEVICE, TYPE_POLICY, TI, RNG>::LOOP_CORE_CONFIG;
 template <typename BASE>
 struct LOOP_EVALUATION_PARAMETER_OVERWRITES: BASE{}; // no-op
 #else

@@ -5,12 +5,13 @@
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools::rl::zoo::oil_platform_v1::ppo_multi_agent {
     namespace rlt = rl_tools;
-    template <typename DEVICE, typename T, typename TI, typename RNG>
+    template <typename DEVICE, typename TYPE_POLICY, typename TI, typename RNG>
     struct FACTORY {
-        using ENVIRONMENT = typename ENVIRONMENT_FACTORY<DEVICE, T, TI, true>::ENVIRONMENT;
+        using T = typename TYPE_POLICY::DEFAULT;
+        using ENVIRONMENT = typename ENVIRONMENT_FACTORY<DEVICE, TYPE_POLICY, TI, true>::ENVIRONMENT;
 
         struct LOOP_CORE_PARAMETERS
-                : rlt::rl::algorithms::ppo::loop::core::DefaultParameters<T, TI, ENVIRONMENT>
+                : rlt::rl::algorithms::ppo::loop::core::DefaultParameters<TYPE_POLICY, TI, ENVIRONMENT>
         {
             // Multi-agent specific network parameters
             static constexpr TI ACTOR_HIDDEN_DIM = 128;    // Per-agent network size
@@ -37,12 +38,12 @@ namespace rl_tools::rl::zoo::oil_platform_v1::ppo_multi_agent {
             static constexpr TI STEP_LIMIT = 100000;
             
             // Optimizer parameters
-            struct OPTIMIZER_PARAMETERS: nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<T>{
+            struct OPTIMIZER_PARAMETERS: nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<TYPE_POLICY>{
                 static constexpr T ALPHA = 1e-3;
             };
             
             // PPO algorithm parameters
-            struct PPO_PARAMETERS: rl::algorithms::ppo::DefaultParameters<T, TI, BATCH_SIZE>{
+            struct PPO_PARAMETERS: rl::algorithms::ppo::DefaultParameters<TYPE_POLICY, TI, BATCH_SIZE>{
                 static constexpr T GAMMA = 0.99;
                 static constexpr T ACTION_ENTROPY_COEFFICIENT = 0.01;  // Reduced exploration
                 static constexpr TI N_EPOCHS = 1;  // Match bottleneck for stability
@@ -52,12 +53,12 @@ namespace rl_tools::rl::zoo::oil_platform_v1::ppo_multi_agent {
 
         // Use multi-agent approximator (same as bottleneck)
         using LOOP_CORE_CONFIG = rlt::rl::algorithms::ppo::loop::core::Config<
-                T, TI, RNG, ENVIRONMENT, LOOP_CORE_PARAMETERS,
+                TYPE_POLICY, TI, RNG, ENVIRONMENT, LOOP_CORE_PARAMETERS,
                 rlt::rl::algorithms::ppo::loop::core::ConfigApproximatorsSequentialMultiAgent
         >;
 
         struct LOOP_EVAL_PARAMETERS
-                : rlt::rl::loop::steps::evaluation::Parameters<T,TI,LOOP_CORE_CONFIG>
+                : rlt::rl::loop::steps::evaluation::Parameters<TYPE_POLICY,TI,LOOP_CORE_CONFIG>
         {
             static constexpr TI EVALUATION_INTERVAL = 200000;
         };

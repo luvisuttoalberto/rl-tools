@@ -130,12 +130,16 @@ namespace rl_tools {
                         // 0 -> legacy Gaussian proximity shaping
                         // 1 -> non-spatial battery risk penalty only
                         // 2 -> non-spatial battery risk + charging event terms
-                        static constexpr TI CHARGING_OBJECTIVE_VARIANT = 1;
+                        static constexpr TI CHARGING_OBJECTIVE_VARIANT = 0;
                         static constexpr bool CHARGING_SHAPING_GATE_ENABLED = false;
                         // Coverage toggle: ignore charging agents when computing coverage
                         static constexpr bool EXCLUDE_CHARGING_FROM_COVERAGE = true;
                         // Actor-only toggle: include charging station position in observations
                         static constexpr bool ACTOR_OBSERVE_CHARGING_STATION_POSITION = true;
+                        // When true, disaster and charger positions are expressed as displacement
+                        // vectors relative to each agent (e.g. charger_x - agent_x) rather than
+                        // absolute world coordinates. Keeps own position absolute as world anchor.
+                        static constexpr bool OBSERVE_RELATIVE_POSITIONS = true;
                         // Hard gate for charging shaping (normalized battery in [0,1])
                         static constexpr T CHARGING_SHAPING_BATTERY_THRESHOLD = T(0.75);
                         // Non-linear ramp exponent for charging urgency below threshold
@@ -298,9 +302,23 @@ namespace rl_tools {
                         static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_TOTAL_DIM; // N * (8 + (N-1)*6 + shared)
 #else
                         // SAC-friendly layout: all agents' blocks concatenated, then shared info once
-                        static constexpr TI PER_AGENT_DIM = 8; // pos(2), vel(2), is_detecting(1), battery(1), dead(1), is_charging(1)
-                        static constexpr TI SHARED_DIM = PARAMETERS::ACTOR_OBSERVE_CHARGING_STATION_POSITION ? 5 : 3;
-                        static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_DIM + SHARED_DIM; // concatenated per-agent blocks + shared info
+                        // Base per-agent: pos(2), vel(2), is_detecting(1), battery(1), dead(1), is_charging(1)
+                        static constexpr TI BASE_PER_AGENT_DIM = 8;
+                        // When using relative positions, disaster (2) and optionally charger (2)
+                        // displacements are appended to each agent's own block instead of shared.
+                        static constexpr TI RELATIVE_EXTRA_DIM =
+                            PARAMETERS::OBSERVE_RELATIVE_POSITIONS
+                                ? (2 + (PARAMETERS::ACTOR_OBSERVE_CHARGING_STATION_POSITION ? 2 : 0))
+                                : 0;
+                        static constexpr TI PER_AGENT_DIM = BASE_PER_AGENT_DIM + RELATIVE_EXTRA_DIM;
+                        // Shared: only the disaster_detected_global flag when using relative positions
+                        // (disaster/charger positions have moved into per-agent block).
+                        // Absolute mode keeps the current layout: flag + disaster_pos(2) + charger_pos(2 opt).
+                        static constexpr TI SHARED_DIM =
+                            PARAMETERS::OBSERVE_RELATIVE_POSITIONS
+                                ? 1
+                                : (PARAMETERS::ACTOR_OBSERVE_CHARGING_STATION_POSITION ? 5 : 3);
+                        static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_DIM + SHARED_DIM;
 #endif
                     };
 
