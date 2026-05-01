@@ -469,6 +469,7 @@ namespace rl_tools {
         state.metrics.battery_risk_penalty = 0;
         state.metrics.charging_event_penalty = 0;
         state.metrics.repulsion_penalty = 0;
+        state.metrics.charger_occupancy_penalty = 0;
         state.metrics.abandonment_penalty = 0;
         state.metrics.death_penalty = 0;
         state.metrics.ongoing_death_penalty = 0;
@@ -552,6 +553,7 @@ namespace rl_tools {
         state.metrics.battery_risk_penalty = 0;
         state.metrics.charging_event_penalty = 0;
         state.metrics.repulsion_penalty = 0;
+        state.metrics.charger_occupancy_penalty = 0;
         state.metrics.abandonment_penalty = 0;
         state.metrics.death_penalty = 0;
         state.metrics.ongoing_death_penalty = 0;
@@ -1328,15 +1330,16 @@ namespace rl_tools {
             }
         }
 
-        // Abandonment penalty: fixed penalty for not observing previously-detected disasters
-        // Use state (not next_state) to ensure penalty reflects consequences of past abandonment
+        // Abandonment penalty: fires every step the disaster is known but no agent is observing it.
+        // Uses next_state so it penalises the direct consequence of the current action.
         T abandonment_penalty = T(0);
-        // if (state.disaster.active &&
-        //     state.disaster_detected_global &&
-        //     state.disaster_undetected_steps > 0) {
-        //     // Fixed penalty whenever disaster is unobserved after being detected
-        //     abandonment_penalty = PARAMS::ABANDONMENT_PENALTY;  // Already negative
-        // }
+        if constexpr (PARAMS::ABANDONMENT_PENALTY_ACTIVE) {
+            if (next_state.disaster.active &&
+                next_state.disaster_detected_global &&
+                next_state.disaster_undetected_steps > 0) {
+                abandonment_penalty = PARAMS::ABANDONMENT_PENALTY;
+            }
+        }
 
         T death_penalty = T(0);
         TI dead_count = 0;
@@ -1366,8 +1369,23 @@ namespace rl_tools {
             }
         }
 
+        // Charger occupancy penalty: penalise each agent beyond the first that is simultaneously charging.
+        // Encourages turn-taking rather than group charging visits.
+        T charger_occupancy_penalty = T(0);
+        if constexpr (PARAMS::CHARGER_OCCUPANCY_PENALTY_ACTIVE) {
+            TI charging_count = 0;
+            for (TI i = 0; i < N_AGENTS; ++i) {
+                if (!next_state.drone_states[i].dead && next_state.drone_states[i].is_charging) {
+                    ++charging_count;
+                }
+            }
+            if (charging_count > 1) {
+                charger_occupancy_penalty = -PARAMS::CHARGER_OCCUPANCY_BETA * T(charging_count - 1);
+            }
+        }
+
 //        T total_reward = coverage_penalty + charging_penalty + temporal_penalty + death_penalty + ongoing_death_penalty + movement_penalty + repulsion_penalty;
-        T total_reward = coverage_penalty + charging_penalty + repulsion_penalty + abandonment_penalty + death_penalty + ongoing_death_penalty + movement_penalty;
+        T total_reward = coverage_penalty + charging_penalty + repulsion_penalty + charger_occupancy_penalty + abandonment_penalty + death_penalty + ongoing_death_penalty + movement_penalty;
 
         utils::assert_exit(device, !math::is_nan(device.math, total_reward), "reward is nan");
 
@@ -1388,6 +1406,7 @@ namespace rl_tools {
         next_state.metrics.battery_risk_penalty = battery_risk_penalty;
         next_state.metrics.charging_event_penalty = charging_event_penalty;
         next_state.metrics.repulsion_penalty = repulsion_penalty;
+        next_state.metrics.charger_occupancy_penalty = charger_occupancy_penalty;
         next_state.metrics.abandonment_penalty = abandonment_penalty;
         next_state.metrics.death_penalty = death_penalty;
         next_state.metrics.ongoing_death_penalty = ongoing_death_penalty;
@@ -1420,7 +1439,7 @@ namespace rl_tools {
             const auto &agent_state = state.drone_states[agent_i];
             TI offset = agent_i * PER_AGENT_DIM;
 
-            // Base 8 per-agent dims (same in both modes)
+            // Own state: 8 dims
             set(observation, 0, offset + 0, 2 * (agent_state.position[0] / PARAMS::GRID_SIZE_X) - 1);
             set(observation, 0, offset + 1, 2 * (agent_state.position[1] / PARAMS::GRID_SIZE_Y) - 1);
             set(observation, 0, offset + 2, agent_state.dead ? T(0) : agent_state.velocity[0] / PARAMS::MAX_SPEED);
@@ -1430,9 +1449,8 @@ namespace rl_tools {
             set(observation, 0, offset + 6, agent_state.dead ? T(1) : T(-1));
             set(observation, 0, offset + 7, agent_state.dead ? T(-1) : (agent_state.is_charging ? T(1) : T(-1)));
 
+            // Relative disaster, charger and global flag: RELATIVE_EXTRA_DIM dims
             if constexpr (PARAMS::OBSERVE_RELATIVE_POSITIONS) {
-                // Relative disaster displacement (dims 8, 9).
-                // Use 0 when not detected — gated by disaster_detected_global in shared dim 0.
                 const T rel_disaster_x = state.disaster_detected_global
                     ? (state.last_detected_disaster_position[0] - agent_state.position[0]) / T(PARAMS::GRID_SIZE_X)
                     : T(10);
@@ -1443,21 +1461,50 @@ namespace rl_tools {
                 set(observation, 0, offset + 9, rel_disaster_y);
 
                 if constexpr (PARAMS::ACTOR_OBSERVE_CHARGING_STATION_POSITION) {
-                    // Relative charger displacement (dims 10, 11).
                     const T rel_charger_x = (state.charging_station_position[0] - agent_state.position[0]) / T(PARAMS::GRID_SIZE_X);
                     const T rel_charger_y = (state.charging_station_position[1] - agent_state.position[1]) / T(PARAMS::GRID_SIZE_Y);
                     set(observation, 0, offset + 10, rel_charger_x);
                     set(observation, 0, offset + 11, rel_charger_y);
                 }
+
+                set(observation, 0, offset + OBS::BASE_PER_AGENT_DIM + OBS::RELATIVE_EXTRA_DIM - 1,
+                    state.disaster_detected_global ? T(1) : T(-1));
+            }
+
+            // Other agents: PER_OTHER_AGENT_DIM dims each, in index order skipping self
+            // Layout per other agent: rel_pos(2), vel(2), battery(1), dead(1), is_charging(1), is_detecting(1)
+            {
+                TI other_offset = offset + OBS::BASE_PER_AGENT_DIM + OBS::RELATIVE_EXTRA_DIM;
+                TI slot = 0;
+                for (TI agent_j = 0; agent_j < PARAMS::N_AGENTS; ++agent_j) {
+                    if (agent_j == agent_i) { continue; }
+                    const auto &other = state.drone_states[agent_j];
+                    TI base = other_offset + slot * OBS::PER_OTHER_AGENT_DIM;
+                    set(observation, 0, base + 0, (other.position[0] - agent_state.position[0]) / T(PARAMS::GRID_SIZE_X));
+                    set(observation, 0, base + 1, (other.position[1] - agent_state.position[1]) / T(PARAMS::GRID_SIZE_Y));
+                    set(observation, 0, base + 2, other.dead ? T(0) : other.velocity[0] / PARAMS::MAX_SPEED);
+                    set(observation, 0, base + 3, other.dead ? T(0) : other.velocity[1] / PARAMS::MAX_SPEED);
+                    set(observation, 0, base + 4, 2 * (other.battery / 100) - 1);
+                    set(observation, 0, base + 5, other.dead ? T(1) : T(-1));
+                    set(observation, 0, base + 6, other.dead ? T(-1) : (other.is_charging  ? T(1) : T(-1)));
+                    set(observation, 0, base + 7, other.dead ? T(-1) : (other.is_detecting ? T(1) : T(-1)));
+                    ++slot;
+                }
+            }
+
+            // One-hot agent index: breaks weight-sharing symmetry so agents in identical
+            // states can learn differentiated actions (e.g. diverge after disaster)
+            {
+                TI id_offset = offset + OBS::BASE_PER_AGENT_DIM + OBS::RELATIVE_EXTRA_DIM + OBS::OTHER_AGENTS_DIM;
+                for (TI k = 0; k < PARAMS::N_AGENTS; ++k) {
+                    set(observation, 0, id_offset + k, k == agent_i ? T(1) : T(-1));
+                }
             }
         }
 
-        // Shared observations appended after all per-agent blocks
-        TI shared_offset = PARAMS::N_AGENTS * PER_AGENT_DIM;
-        if constexpr (PARAMS::OBSERVE_RELATIVE_POSITIONS) {
-            // Only the detection flag — positions are already encoded per-agent above
-            set(observation, 0, shared_offset + 0, state.disaster_detected_global ? T(1) : T(-1));
-        } else {
+        // Shared observations (only in absolute mode; relative mode has SHARED_DIM=0)
+        if constexpr (!PARAMS::OBSERVE_RELATIVE_POSITIONS) {
+            TI shared_offset = PARAMS::N_AGENTS * PER_AGENT_DIM;
             // Absolute mode: flag + last-known disaster position + optional charger position
             set(observation, 0, shared_offset + 0, state.disaster_detected_global ? T(1) : T(-1));
             set(observation, 0, shared_offset + 1, !state.disaster_detected_global ? T(0) : 2 * (state.last_detected_disaster_position[0] / T(PARAMS::GRID_SIZE_X)) - 1);

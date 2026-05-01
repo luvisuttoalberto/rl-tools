@@ -1,5 +1,6 @@
 #pragma once
 #include "environment.h"
+#include "per_agent_actor.h"
 #include <rl_tools/rl/algorithms/sac/loop/core/config.h>
 
 RL_TOOLS_NAMESPACE_WRAPPER_START
@@ -57,7 +58,10 @@ namespace rl_tools::rl::zoo::oil_platform_v1::sac {
             static constexpr bool SAMPLE_ENVIRONMENT_PARAMETERS = false;
         };
 
-        using LOOP_CORE_CONFIG = rlt::rl::algorithms::sac::loop::core::Config<TYPE_POLICY, TI, RNG, ENVIRONMENT, LOOP_CORE_PARAMETERS, rlt::rl::algorithms::sac::loop::core::ConfigApproximatorsMLP, DYNAMIC_ALLOCATION>;
+        using LOOP_CORE_CONFIG = rlt::rl::algorithms::sac::loop::core::Config<
+            TYPE_POLICY, TI, RNG, ENVIRONMENT, LOOP_CORE_PARAMETERS,
+            multi_agent_sac::ConfigApproximatorsMLPMultiAgent,
+            DYNAMIC_ALLOCATION>;
     };
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END

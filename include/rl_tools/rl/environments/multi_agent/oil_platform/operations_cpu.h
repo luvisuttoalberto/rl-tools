@@ -97,6 +97,7 @@ namespace rl_tools {
         result += "\"battery_risk_penalty\": " + std::to_string(state.metrics.battery_risk_penalty) + ",";
         result += "\"charging_event_penalty\": " + std::to_string(state.metrics.charging_event_penalty) + ",";
         result += "\"repulsion_penalty\": " + std::to_string(state.metrics.repulsion_penalty) + ",";
+        result += "\"charger_occupancy_penalty\": " + std::to_string(state.metrics.charger_occupancy_penalty) + ",";
         result += "\"abandonment_penalty\": " + std::to_string(state.metrics.abandonment_penalty) + ",";
         result += "\"death_penalty\": " + std::to_string(state.metrics.death_penalty) + ",";
         result += "\"ongoing_death_penalty\": " + std::to_string(state.metrics.ongoing_death_penalty) + ",";
@@ -263,6 +264,7 @@ export async function render(ui_state, parameters, state, action) {
             ['Battery Risk Component', state.battery_risk_penalty],
             ['Charging Event Component', state.charging_event_penalty],
             ['Repulsion Penalty', state.repulsion_penalty],
+            ['Charger Occupancy Penalty', state.charger_occupancy_penalty],
             ['Abandonment Penalty', state.abandonment_penalty],
             ['Death Penalty', state.death_penalty],
             ['Ongoing Death Penalty', state.ongoing_death_penalty],
@@ -419,11 +421,13 @@ export async function render(ui_state, parameters, state, action) {
     ctx.textBaseline = 'top';
     ctx.fillText(`Step: ${state.step_count} | FPS: ${ui_state.fps || 0}`, 10, 10);
 
-    // Disaster status if active
+    // Disaster status (right side)
+    ctx.font = '14px Arial';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
     if (state.disaster && state.disaster.active) {
         ctx.fillStyle = 'red';
-        ctx.fillText(`DISASTER ACTIVE`, 10, 50);
-
+        ctx.fillText(`DISASTER ACTIVE`, width - 10, 10);
 
         // Check if detected
         let detected = false;
@@ -436,26 +440,26 @@ export async function render(ui_state, parameters, state, action) {
 
         if (detected) {
             ctx.fillStyle = 'green';
-            ctx.fillText(`DETECTED`, 150, 50);
+            ctx.fillText(`DETECTED`, width - 10, 30);
         } else {
             ctx.fillStyle = 'orange';
-            ctx.fillText(`UNDETECTED`, 150, 50);
+            ctx.fillText(`UNDETECTED`, width - 10, 30);
         }
     }
 
-    // show exact disaster coords
+    // Disaster location and undetected steps (right side)
     ctx.fillStyle = 'black';
     ctx.font = '12px Arial';
     ctx.fillText(
       `Location: (${state.last_detected_disaster_position[0].toFixed(1)}, ` +
       `${state.last_detected_disaster_position[1].toFixed(1)})`,
-      10, 90
+      width - 10, 50
     );
-    // Add display of undetected steps
     ctx.fillText(
       `Undetected steps: ${state.disaster_undetected_steps}`,
-      10, 110
+      width - 10, 66
     );
+    ctx.textAlign = 'left';
 
 
     // Display critical battery status

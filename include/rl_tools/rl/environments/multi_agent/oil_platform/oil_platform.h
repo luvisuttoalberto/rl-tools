@@ -31,6 +31,9 @@ namespace rl_tools {
                         static constexpr T REPULSION_BETA = 0.675;
                         static constexpr bool CONST_PENALTY_WHILE_COVERAGE = false;
 
+                        static constexpr bool CHARGER_OCCUPANCY_PENALTY_ACTIVE = true;
+                        static constexpr T CHARGER_OCCUPANCY_BETA = 1.0;
+
 
                         // Number of drones
                         static constexpr TI N_AGENTS = 3;
@@ -164,8 +167,9 @@ namespace rl_tools {
                         static constexpr T MOVEMENT_COST_COEFFICIENT = 0.;  // Cost per unit of speed
 //                        static constexpr T MOVEMENT_COST_COEFFICIENT = 0.03;  // Cost per unit of speed
 
-                        // Abandonment penalty: penalize agents for not observing previously-detected disasters
-                        static constexpr T ABANDONMENT_PENALTY = -0.5;  // Fixed penalty when disaster is unobserved
+                        // Abandonment penalty: penalize every step the disaster is known but no agent observes it
+                        static constexpr bool ABANDONMENT_PENALTY_ACTIVE = true;
+                        static constexpr T ABANDONMENT_PENALTY = -0.5;
 
                         // ---- Multi-center Gaussian reward (platform + 4 arms) -----------------
 
@@ -301,22 +305,25 @@ namespace rl_tools {
                         static constexpr TI PER_AGENT_TOTAL_DIM = PER_AGENT_DIM + OTHER_AGENTS_DIM + SHARED_DIM; // 8 + (N-1)*6 + shared per agent
                         static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_TOTAL_DIM; // N * (8 + (N-1)*6 + shared)
 #else
-                        // SAC-friendly layout: all agents' blocks concatenated, then shared info once
-                        // Base per-agent: pos(2), vel(2), is_detecting(1), battery(1), dead(1), is_charging(1)
+                        // SAC-friendly layout: per-agent block contains own state + other agents + disaster/charger info
+                        // Own state: pos(2), vel(2), is_detecting(1), battery(1), dead(1), is_charging(1)
                         static constexpr TI BASE_PER_AGENT_DIM = 8;
-                        // When using relative positions, disaster (2) and optionally charger (2)
-                        // displacements are appended to each agent's own block instead of shared.
+                        // Relative disaster(2) + optional charger(2) + disaster_detected_global(1) per agent.
                         static constexpr TI RELATIVE_EXTRA_DIM =
                             PARAMETERS::OBSERVE_RELATIVE_POSITIONS
-                                ? (2 + (PARAMETERS::ACTOR_OBSERVE_CHARGING_STATION_POSITION ? 2 : 0))
+                                ? (2 + (PARAMETERS::ACTOR_OBSERVE_CHARGING_STATION_POSITION ? 2 : 0) + 1)
                                 : 0;
-                        static constexpr TI PER_AGENT_DIM = BASE_PER_AGENT_DIM + RELATIVE_EXTRA_DIM;
-                        // Shared: only the disaster_detected_global flag when using relative positions
-                        // (disaster/charger positions have moved into per-agent block).
-                        // Absolute mode keeps the current layout: flag + disaster_pos(2) + charger_pos(2 opt).
+                        // Other agents: rel_pos(2), vel(2), battery(1), dead(1), is_charging(1), is_detecting(1)
+                        static constexpr TI PER_OTHER_AGENT_DIM = 8;
+                        static constexpr TI OTHER_AGENTS_DIM = (PARAMETERS::N_AGENTS - 1) * PER_OTHER_AGENT_DIM;
+                        // One-hot agent index to break symmetry with shared weights
+                        static constexpr TI AGENT_ID_DIM = PARAMETERS::N_AGENTS;
+                        static constexpr TI PER_AGENT_DIM = BASE_PER_AGENT_DIM + RELATIVE_EXTRA_DIM + OTHER_AGENTS_DIM + AGENT_ID_DIM;
+                        // Shared: in relative mode the flag has moved per-agent (SHARED_DIM=0).
+                        // Absolute mode keeps: flag + disaster_pos(2) + charger_pos(2 opt).
                         static constexpr TI SHARED_DIM =
                             PARAMETERS::OBSERVE_RELATIVE_POSITIONS
-                                ? 1
+                                ? 0
                                 : (PARAMETERS::ACTOR_OBSERVE_CHARGING_STATION_POSITION ? 5 : 3);
                         static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_DIM + SHARED_DIM;
 #endif
@@ -377,6 +384,7 @@ namespace rl_tools {
                         T battery_risk_penalty;
                         T charging_event_penalty;
                         T repulsion_penalty;
+                        T charger_occupancy_penalty;
                         T abandonment_penalty;
                         T death_penalty;
                         T ongoing_death_penalty;

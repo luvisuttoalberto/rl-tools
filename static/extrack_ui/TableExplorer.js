@@ -922,6 +922,8 @@ export class TableExplorer {
         modalContent.appendChild(closeButton);
         
         const playerContainer = document.createElement('div');
+        playerContainer.style.width = '700px';
+        playerContainer.style.height = '700px';
         const trajectoryPlayer = new TrajectoryPlayer(run.ui_jsm);
         playerContainer.appendChild(trajectoryPlayer.getCanvas());
         modalContent.appendChild(playerContainer);
