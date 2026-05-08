@@ -67,6 +67,55 @@ is high, letting coverage dominate.
   Example with threshold=0.75: urgency at 60% battery = ((0.75−0.60)/0.75)² = 0.04. Too small.
 - Linear ramp gives urgency = 0.25 at 60% battery — a usable gradient across the whole range.
 
+### Step 1.5 — Fix hovering exploit and emergency charging blockage
+
+Must be applied before Step 2. Two issues observed after Step 1:
+
+1. **Hovering near charger without charging.** With `CHARGING_SHAPING_SCALE = 1.0` an agent
+   hovering at the charger (proximity ≈ 1.0) gets the same `fleet_charging_value` contribution
+   as an agent that is actually charging. The reward is identical whether or not `is_charging`
+   is true, so the policy has no incentive to stop and initiate a charging session. This becomes
+   worse after Step 2 because sigma=10 makes proximity ≈ 0.98 even at distance 2 (just outside
+   `CHARGING_STATION_RANGE`), further flattening the gradient near the charger.
+
+2. **Occupancy penalty blocking emergency charging.** With `CHARGER_OCCUPANCY_BETA = 1.0` the
+   penalty for a second simultaneous charger (−1.0/step) can outweigh the urgency signal of a
+   critically low agent and prevent it from starting a session.
+
+| Parameter | Current | New |
+|---|---|---|
+| `CHARGING_SHAPING_SCALE` | `1.0` | `0.3` |
+| `CHARGER_OCCUPANCY_BETA` | `1.0` | `0.3` |
+
+**Rationale for CHARGING_SHAPING_SCALE = 0.3:**
+
+The charging penalty for an agent at the charger (proximity ≈ 1.0, `charging_weight = cw`):
+- Hovering (not charging): penalty = `−cw × (1 − 0.3) = −0.7 × cw`
+- Actually charging: penalty = `0`
+
+Gap of `0.7 × cw` per step creates a clear incentive to initiate the charging session.
+At 40% battery (`cw = 0.5`): gap = 0.35/step — meaningful relative to other terms.
+
+The approach gradient from far away (Step 2, sigma=10, D=14, cw=0.5) reduces from
+0.010/unit to 0.008/unit — still fully learnable, since directional guidance only
+requires a non-zero gradient, not a large one.
+
+**Rationale for CHARGER_OCCUPANCY_BETA = 0.3:**
+
+Net fleet benefit of a second agent charging = `0.7 × cw₂ − 0.3`.
+This is positive when `cw₂ > 0.43`, i.e., battery below ≈ 45%.
+
+| Battery | Should second agent charge? |
+|---|---|
+| 10% (cw=0.875) | ✓ net +0.31 — emergency overrides penalty |
+| 30% (cw=0.625) | ✓ net +0.14 |
+| 45% (cw≈0.44) | break-even |
+| 60% (cw=0.25) | ✗ net −0.12 — wait turn |
+| 79% (cw≈0.01) | ✗ net −0.29 — strongly defer |
+
+Emergency charging (battery < 45%) remains beneficial despite the occupancy penalty;
+moderate/high battery agents respect turn-taking.
+
 ### Step 2 — Increase both Gaussians together
 
 Fix Issues 2a and 2b. The two sigmas must be changed together and kept equal to preserve
@@ -119,6 +168,83 @@ the designed property that battery urgency alone governs the charger-vs-disaster
 
 **If Issue 2a persists near distant disasters:** Increase `GAUSS_SIGMA_CHARGING` (and
 `GAUSS_SIGMA_EVENT` equally) toward 12.0. Do not change them independently.
+
+---
+
+## Step 3 — Randomize episode length to fix end-of-episode behavior
+
+### Issue
+
+Agents show inconsistent survival behavior during the last ~50 steps of the episode. They stop
+returning to the charger even when battery is critically low.
+
+### Root cause
+
+This is a **finite-horizon discounting effect**, not a policy failure. Two mechanisms interact:
+
+1. **The value function implicitly encodes episode position.** Without an explicit step counter
+   in the observation, the agent still infers approximate episode age through correlated features:
+   - Battery level is a partial clock (drains at `DISCHARGE_RATE_BASE = 0.15/step`)
+   - Disaster state constrains episode age (disaster spawns at 0.01/step, so late-episode
+     disaster + already-charged-once implies the episode is old)
+   - The critic learns these correlations during training
+
+2. **Late-episode death is genuinely cheaper in the discounted objective.** With `GAMMA = 0.99`:
+   - Die at step 100: pay `DEATH_PENALTY` + ~900 steps of `ongoing_death_penalty` (large sum)
+   - Die at step 990: pay `DEATH_PENALTY` + only ~10 steps of `ongoing_death_penalty`
+   - The discounted cost of dying at step 990, viewed from step 950, is 0.99^40 × cost ≈ 0.67 × cost
+   - The agent is solving the correct discounted objective; the behavior is mathematically rational
+
+### Fix
+
+Randomize `EPISODE_STEP_LIMIT` at each episode reset by sampling from a uniform distribution.
+This breaks the implicit time signal: no observable feature can reliably predict when the episode
+will end, so the agent cannot rationally discount survival.
+
+Note: `GAUSS_SIGMA_COVER` does **not** need to be changed — it is dead code when
+`USE_VORONOI_COVERAGE = true` (coverage_potential is set to 0 in the per-agent loop and computed
+collectively via Voronoi after the loop; sigma is never read during coverage phase).
+
+| Parameter | Current | New |
+|---|---|---|
+| `EPISODE_STEP_LIMIT_MIN` | — | `700` |
+| `EPISODE_STEP_LIMIT_MAX` | — | `1300` |
+
+Add `TI episode_step_limit` to the `State` struct and sample it during `reset()`. The SAC
+config's `EPISODE_STEP_LIMIT` (used for replay buffer sizing) stays at the max value.
+
+**Why these bounds:**
+- Minimum 700: with `DISASTER_PROBABILITY_SPAWN = 0.01`, expected first spawn is step 100.
+  Episodes shorter than ~500 steps risk having too few disaster-phase steps for effective
+  learning. 700 gives ample disaster exposure in all episodes.
+- Maximum 1300: keeps episode length within 30% of the nominal 1000, preserving training
+  efficiency and replay buffer statistics.
+- Range [700, 1300]: wide enough that no battery level or disaster-state combination reliably
+  predicts episode end. An agent at 20% battery could face 300 more steps or 5 — it cannot
+  safely assume the episode is ending.
+
+**What this does NOT fix:** The discounting effect itself persists — if the episode happens to
+end in 5 steps, the Q-value for "go charge" is still suppressed. But since the agent cannot
+predict when that will happen, the policy must learn to charge whenever battery is critical,
+averaged across all possible remaining durations.
+
+**Optional complement:** Add `remaining_fraction = episode_step_limit - step_count) / episode_step_limit`
+to the observation. This lets the critic produce more accurate value estimates conditioned on
+remaining time, but is not strictly necessary if the randomization range is wide enough.
+
+### Implementation changes
+
+1. Add to `DefaultParameters` in `oil_platform.h`:
+   ```cpp
+   static constexpr TI EPISODE_STEP_LIMIT_MIN = 700;
+   static constexpr TI EPISODE_STEP_LIMIT_MAX = 1300;
+   ```
+2. Add `TI episode_step_limit` field to `State` struct in `oil_platform.h`.
+3. In `reset()` in `operations_generic.h`: sample `state.episode_step_limit` uniformly from
+   `[PARAMS::EPISODE_STEP_LIMIT_MIN, PARAMS::EPISODE_STEP_LIMIT_MAX]`.
+4. In the termination condition in `operations_generic.h`: replace compile-time
+   `PARAMS::EPISODE_STEP_LIMIT` with `state.episode_step_limit`.
+5. In `sac.h`: keep `EPISODE_STEP_LIMIT = 1300` (the max) for replay buffer sizing.
 
 ---
 

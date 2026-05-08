@@ -32,7 +32,7 @@ namespace rl_tools {
                         static constexpr bool CONST_PENALTY_WHILE_COVERAGE = false;
 
                         static constexpr bool CHARGER_OCCUPANCY_PENALTY_ACTIVE = true;
-                        static constexpr T CHARGER_OCCUPANCY_BETA = 1.0;
+                        static constexpr T CHARGER_OCCUPANCY_BETA = 0.3;
 
 
                         // Number of drones
@@ -100,7 +100,8 @@ namespace rl_tools {
 
 
                         static constexpr T GAUSS_SIGMA_COVER = SENSOR_RANGE/2;          // pre-disaster
-                        static constexpr T GAUSS_SIGMA_EVENT = SENSOR_RANGE/3;    // post-spawn
+                        static constexpr T GAUSS_SIGMA_EVENT = 10.0;    // post-spawn
+                        // static constexpr T GAUSS_SIGMA_EVENT = SENSOR_RANGE/3;    // post-spawn
                         static constexpr T GAUSS_BETA_COVER        = 1.0;   //Coverage reward
                         static constexpr T GAUSS_BETA_EVENT        = 1.0;  // Disaster detection reward
                         
@@ -126,15 +127,16 @@ namespace rl_tools {
 
                         // Battery and charging parameters
                         static constexpr T DISCHARGE_RATE_BASE = T(0.15);
-                        static constexpr T GAUSS_SIGMA_CHARGING = CHARGING_STATION_RANGE;
+                        // static constexpr T GAUSS_SIGMA_CHARGING = CHARGING_STATION_RANGE;
+                        static constexpr T GAUSS_SIGMA_CHARGING = 10.0;
                         static constexpr T GAUSS_BETA_CHARGING = 1.0;
-                        static constexpr T CHARGING_SHAPING_SCALE = T(1.0);
+                        static constexpr T CHARGING_SHAPING_SCALE = T(0.3);
                         // Charging objective selector:
                         // 0 -> legacy Gaussian proximity shaping
                         // 1 -> non-spatial battery risk penalty only
                         // 2 -> non-spatial battery risk + charging event terms
                         static constexpr TI CHARGING_OBJECTIVE_VARIANT = 0;
-                        static constexpr bool CHARGING_SHAPING_GATE_ENABLED = false;
+                        static constexpr bool CHARGING_SHAPING_GATE_ENABLED = true;
                         // Coverage toggle: ignore charging agents when computing coverage
                         static constexpr bool EXCLUDE_CHARGING_FROM_COVERAGE = true;
                         // Actor-only toggle: include charging station position in observations
@@ -144,9 +146,9 @@ namespace rl_tools {
                         // absolute world coordinates. Keeps own position absolute as world anchor.
                         static constexpr bool OBSERVE_RELATIVE_POSITIONS = true;
                         // Hard gate for charging shaping (normalized battery in [0,1])
-                        static constexpr T CHARGING_SHAPING_BATTERY_THRESHOLD = T(0.75);
+                        static constexpr T CHARGING_SHAPING_BATTERY_THRESHOLD = T(0.8);
                         // Non-linear ramp exponent for charging urgency below threshold
-                        static constexpr T CHARGING_URGENCY_RAMP_POWER = T(2.0);
+                        static constexpr T CHARGING_URGENCY_RAMP_POWER = T(1.0);
                         static constexpr T BATTERY_URGENCY_K = 1.0;
                         // Non-spatial battery-risk shaping parameters (variants 1 and 2)
                         static constexpr T BATTERY_RISK_WARNING_THRESHOLD = T(0.45);

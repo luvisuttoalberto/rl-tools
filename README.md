@@ -95,6 +95,16 @@ Clone this repo, then build a Zoo example:
 ```
 g++ -std=c++17 -O3 -ffast-math -I include src/rl/zoo/l2f/sac.cpp
 ```
+
+```
+/snap/clion/437/bin/cmake/linux/x64/bin/cmake --build cmake-build-debug --target rl_zoo_oil_platform-v1_sac -j 16
+```
+
+```
+/home/albertoluvisutto/git/rl-tools/cmake-build-debug/src/rl/zoo/rl_zoo_oil_platform-v1_sac
+```
+
+
 Run it `./a.out 1337` (number = seed) then run `./tools/serve.sh` to visualize the results. Open `http://localhost:8000` and navigate to the ExTrack UI to watch the quadrotor flying. 
 
 - **macOS**: Append `-framework Accelerate -DRL_TOOLS_BACKEND_ENABLE_ACCELERATE` for fast training (~4s on M3)
