@@ -90,6 +90,7 @@ namespace rl_tools {
         result += "\"last_detected_disaster_position\": [" + std::to_string(state.last_detected_disaster_position[0]) + "," + std::to_string(state.last_detected_disaster_position[1]) + "],";
         result += "\"charging_station_position\": [" + std::to_string(state.charging_station_position[0]) + "," + std::to_string(state.charging_station_position[1]) + "],";
         result += "\"step_count\": " + std::to_string(state.step_count) + ",";
+        result += "\"episode_step_limit\": " + std::to_string(state.episode_step_limit) + ",";
         result += "\"disaster_undetected_steps\": " + std::to_string(state.disaster_undetected_steps) + ",";
         result += "\"per_step_reward\": " + std::to_string(state.metrics.per_step_reward) + ",";
         result += "\"coverage_penalty\": " + std::to_string(state.metrics.coverage_penalty) + ",";
@@ -419,7 +420,7 @@ export async function render(ui_state, parameters, state, action) {
     ctx.font = '14px Arial';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText(`Step: ${state.step_count} | FPS: ${ui_state.fps || 0}`, 10, 10);
+    ctx.fillText(`Step: ${state.step_count}/${state.episode_step_limit} | FPS: ${ui_state.fps || 0}`, 10, 10);
 
     // Disaster status (right side)
     ctx.font = '14px Arial';

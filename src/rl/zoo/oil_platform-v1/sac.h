@@ -9,7 +9,7 @@ namespace rl_tools::rl::zoo::oil_platform_v1::sac {
     template <typename DEVICE, typename TYPE_POLICY, typename TI, typename RNG, bool DYNAMIC_ALLOCATION = true>
     struct FACTORY {
         using T = typename TYPE_POLICY::DEFAULT;
-        using ENVIRONMENT = typename ENVIRONMENT_FACTORY<DEVICE, TYPE_POLICY, TI>::ENVIRONMENT;
+        using ENVIRONMENT = typename ENVIRONMENT_FACTORY<DEVICE, TYPE_POLICY, TI, true>::ENVIRONMENT;
 
         struct LOOP_CORE_PARAMETERS: rlt::rl::algorithms::sac::loop::core::DefaultParameters<TYPE_POLICY, TI, ENVIRONMENT>{
             struct SAC_PARAMETERS: rlt::rl::algorithms::sac::DefaultParameters<TYPE_POLICY, TI, ENVIRONMENT::ACTION_DIM>{
@@ -25,7 +25,7 @@ namespace rl_tools::rl::zoo::oil_platform_v1::sac {
                 static constexpr TI SEQUENCE_LENGTH = 1;
                 static constexpr bool ENTROPY_BONUS_NEXT_STEP = false;
             };
-            static constexpr TI STEP_LIMIT = 5000000;
+            static constexpr TI STEP_LIMIT = 15000000;
             static constexpr TI REPLAY_BUFFER_CAP = 1000000;
             static constexpr TI ACTOR_NUM_LAYERS = 3;
             static constexpr TI ACTOR_HIDDEN_DIM = 128;
@@ -33,7 +33,7 @@ namespace rl_tools::rl::zoo::oil_platform_v1::sac {
             static constexpr TI CRITIC_NUM_LAYERS = 3;
             static constexpr TI CRITIC_HIDDEN_DIM = 256;
             static constexpr auto CRITIC_ACTIVATION_FUNCTION = rlt::nn::activation_functions::ActivationFunction::RELU;
-            static constexpr TI EPISODE_STEP_LIMIT = 1000;
+            static constexpr TI EPISODE_STEP_LIMIT = 1300;
             static constexpr TI N_WARMUP_STEPS = 0;
             static constexpr TI N_WARMUP_STEPS_CRITIC = 5000;
             static constexpr TI N_WARMUP_STEPS_ACTOR = 5000;

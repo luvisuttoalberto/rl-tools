@@ -59,7 +59,17 @@ namespace rl_tools {
                         static constexpr T GRID_CY = GRID_SIZE_Y * T(0.5);
 
                         // Episode length
-                        static constexpr TI EPISODE_STEP_LIMIT = 1000;
+                        static constexpr TI EPISODE_STEP_LIMIT = 1300;
+                        // When true, each episode samples its step limit uniformly from
+                        // [EPISODE_STEP_LIMIT_MIN, EPISODE_STEP_LIMIT_MAX]. Breaks the implicit
+                        // time signal that causes agents to stop charging near episode end.
+                        static constexpr bool RANDOMIZE_EPISODE_LENGTH = true;
+                        // When true, adds remaining_normalized to ObservationPrivileged (critic only).
+                        // Gives the critic explicit horizon information. Required when
+                        // RANDOMIZE_EPISODE_LENGTH=true to avoid critic instability.
+                        static constexpr bool PRIVILEGED_OBSERVE_REMAINING_NORMALIZED = true;
+                        static constexpr TI EPISODE_STEP_LIMIT_MIN = 700;
+                        static constexpr TI EPISODE_STEP_LIMIT_MAX = 1300;
 
                         // Disaster parameters
                         static constexpr T DISASTER_MAX_SPEED = 1.0;
@@ -128,7 +138,7 @@ namespace rl_tools {
                         // Battery and charging parameters
                         static constexpr T DISCHARGE_RATE_BASE = T(0.15);
                         // static constexpr T GAUSS_SIGMA_CHARGING = CHARGING_STATION_RANGE;
-                        static constexpr T GAUSS_SIGMA_CHARGING = 10.0;
+                        static constexpr T GAUSS_SIGMA_CHARGING = 5.0;
                         static constexpr T GAUSS_BETA_CHARGING = 1.0;
                         static constexpr T CHARGING_SHAPING_SCALE = T(0.3);
                         // Charging objective selector:
@@ -145,6 +155,11 @@ namespace rl_tools {
                         // vectors relative to each agent (e.g. charger_x - agent_x) rather than
                         // absolute world coordinates. Keeps own position absolute as world anchor.
                         static constexpr bool OBSERVE_RELATIVE_POSITIONS = true;
+                        // When true, other agents' velocities are encoded as
+                        // (other_vel - self_vel) / (2*MAX_SPEED), giving a fully relative
+                        // inter-agent frame consistent with the relative position encoding.
+                        // When false, absolute world-frame velocities / MAX_SPEED are used.
+                        static constexpr bool OTHER_AGENTS_OBSERVE_RELATIVE_VELOCITY = true;
                         // Hard gate for charging shaping (normalized battery in [0,1])
                         static constexpr T CHARGING_SHAPING_BATTERY_THRESHOLD = T(0.8);
                         // Non-linear ramp exponent for charging urgency below threshold
@@ -337,7 +352,7 @@ namespace rl_tools {
                         using T = typename PARAMETERS::T;
                         using TI = typename PARAMETERS::TI;
                         static constexpr TI PER_AGENT_DIM = 8; // pos(2), vel(2), is_detecting(1), battery(1), dead(1), is_charging(1)
-                        static constexpr TI SHARED_DIM = 8;    // disaster_active flag, disaster_detected_global flag, disaster_pos(2), disaster_vel(2), charging_station_pos(2)
+                        static constexpr TI SHARED_DIM = PARAMETERS::PRIVILEGED_OBSERVE_REMAINING_NORMALIZED ? 9 : 8; // disaster_active, disaster_detected_global, disaster_pos(2), disaster_vel(2), charging_station_pos(2) [+ remaining_normalized(1) if flag set]
                         static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_DIM + SHARED_DIM; // global critic observation
                     };
 
@@ -411,6 +426,7 @@ namespace rl_tools {
                         T last_detected_disaster_position[2];
                         T charging_station_position[2];
                         TI disaster_spawn_step;   // episode step index at spawn time
+                        TI episode_step_limit;    // per-episode step limit (fixed or sampled)
                     };
 
 

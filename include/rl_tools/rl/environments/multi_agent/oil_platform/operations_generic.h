@@ -446,6 +446,14 @@ namespace rl_tools {
         state.last_detected_disaster_position[0] = 0;
         state.last_detected_disaster_position[1] = 0;
 
+        if constexpr (PARAMS::RANDOMIZE_EPISODE_LENGTH) {
+            state.episode_step_limit = PARAMS::EPISODE_STEP_LIMIT_MIN + static_cast<TI>(
+                random::uniform_real_distribution(device.random, T(0),
+                    T(PARAMS::EPISODE_STEP_LIMIT_MAX - PARAMS::EPISODE_STEP_LIMIT_MIN + 1), rng));
+        } else {
+            state.episode_step_limit = PARAMS::EPISODE_STEP_LIMIT;
+        }
+
         // Metrics initialization
         state.metrics.total_coverage_ratio = 0;
         state.metrics.coverage_measurement_count = 0;
@@ -530,6 +538,15 @@ namespace rl_tools {
         state.disaster_undetected_steps = 0;
         state.last_detected_disaster_position[0] = 0;
         state.last_detected_disaster_position[1] = 0;
+
+        // For randomized-length training, evaluate at the maximum episode length so the
+        // evaluation tests the hardest case and the loop cap (sac.h EPISODE_STEP_LIMIT)
+        // matches exactly, letting terminated() fire at the natural end for every episode.
+        if constexpr (PARAMS::RANDOMIZE_EPISODE_LENGTH) {
+            state.episode_step_limit = PARAMS::EPISODE_STEP_LIMIT_MAX;
+        } else {
+            state.episode_step_limit = PARAMS::EPISODE_STEP_LIMIT;
+        }
 
         // Metrics initialization
         state.metrics.total_coverage_ratio = 0;
@@ -1023,8 +1040,9 @@ namespace rl_tools {
             next_state.metrics.death_count = state.metrics.death_count + death_count;
         }
 
-        // (5) Advance step count
+        // (5) Advance step count and carry per-episode limit forward
         next_state.step_count = state.step_count + 1;
+        next_state.episode_step_limit = state.episode_step_limit;
 
         return PARAMS::DT;
     }
@@ -1482,8 +1500,13 @@ namespace rl_tools {
                     TI base = other_offset + slot * OBS::PER_OTHER_AGENT_DIM;
                     set(observation, 0, base + 0, (other.position[0] - agent_state.position[0]) / T(PARAMS::GRID_SIZE_X));
                     set(observation, 0, base + 1, (other.position[1] - agent_state.position[1]) / T(PARAMS::GRID_SIZE_Y));
-                    set(observation, 0, base + 2, other.dead ? T(0) : other.velocity[0] / PARAMS::MAX_SPEED);
-                    set(observation, 0, base + 3, other.dead ? T(0) : other.velocity[1] / PARAMS::MAX_SPEED);
+                    if constexpr (PARAMS::OTHER_AGENTS_OBSERVE_RELATIVE_VELOCITY) {
+                        set(observation, 0, base + 2, other.dead ? T(0) : (other.velocity[0] - agent_state.velocity[0]) / (T(2) * PARAMS::MAX_SPEED));
+                        set(observation, 0, base + 3, other.dead ? T(0) : (other.velocity[1] - agent_state.velocity[1]) / (T(2) * PARAMS::MAX_SPEED));
+                    } else {
+                        set(observation, 0, base + 2, other.dead ? T(0) : other.velocity[0] / PARAMS::MAX_SPEED);
+                        set(observation, 0, base + 3, other.dead ? T(0) : other.velocity[1] / PARAMS::MAX_SPEED);
+                    }
                     set(observation, 0, base + 4, 2 * (other.battery / 100) - 1);
                     set(observation, 0, base + 5, other.dead ? T(1) : T(-1));
                     set(observation, 0, base + 6, other.dead ? T(-1) : (other.is_charging  ? T(1) : T(-1)));
@@ -1579,6 +1602,12 @@ namespace rl_tools {
         set(observation, 0, shared_offset + 6, charger_pos_x);
         set(observation, 0, shared_offset + 7, charger_pos_y);
 
+        if constexpr (PARAMS::PRIVILEGED_OBSERVE_REMAINING_NORMALIZED) {
+            const T remaining_normalized = math::max(device.math,
+                T(state.episode_step_limit) - state.step_count, T(0)) / T(PARAMS::EPISODE_STEP_LIMIT_MAX);
+            set(observation, 0, shared_offset + 8, remaining_normalized);
+        }
+
         utils::assert_exit(device, !is_nan(device, observation), "Privileged observation is nan");
     }
 
@@ -1611,21 +1640,41 @@ namespace rl_tools {
             }
         }
 
-        // Check if disaster left the environment
-        if (!terminate && state.disaster.active) {
-            if (state.disaster.position[0] < 0 ||
-                state.disaster.position[0] >= PARAMS::GRID_SIZE_X ||
-                state.disaster.position[1] < 0 ||
-                state.disaster.position[1] >= PARAMS::GRID_SIZE_Y) {
+        // Note: no disaster out-of-bounds check here. step() already deactivates the disaster
+        // (sets active=false, position=(0,0)) when it exits the grid, so by the time
+        // terminated() is called with next_state, state.disaster.active is already false.
+        // The episode continues and a new disaster can spawn via DISASTER_PROBABILITY_SPAWN.
+
+        // Step limit: only check inside terminated() when RANDOMIZE_EPISODE_LENGTH is true,
+        // because the SAC loop does not know the per-episode sampled limit in that case.
+        // With fixed episode length the loop's own EPISODE_STEP_LIMIT handles truncation
+        // externally; including the check here would make terminated() fire at every episode
+        // end regardless of deaths, causing share_terminated=1 always (metric bug).
+        // NOTE: even in the randomized case, treating the step limit as terminated=true
+        // (rather than truncated) causes the Bellman target to skip bootstrapping for the
+        // final transition. This is an accepted approximation — see appendix in new_plan.md.
+        if constexpr (PARAMS::RANDOMIZE_EPISODE_LENGTH) {
+            if (!terminate && state.step_count >= state.episode_step_limit) {
                 terminate = true;
             }
         }
 
-        // LOG METRICS WHEN EPISODE TERMINATES
-        if (terminate || state.step_count == PARAMS::EPISODE_STEP_LIMIT) {
+        // For fixed-length episodes, also log when the SAC loop's step limit is reached
+        // (the loop calls reset() externally without setting terminate=true, so this is the
+        // only place we can capture metrics for episodes that end by truncation, not death).
+        bool log_episode_end = terminate;
+        if constexpr (!PARAMS::RANDOMIZE_EPISODE_LENGTH) {
+            if (!terminate && state.step_count >= PARAMS::EPISODE_STEP_LIMIT) {
+                log_episode_end = true;
+            }
+        }
+
+        // LOG METRICS AT EPISODE END (terminated or truncated)
+        if (log_episode_end) {
 
             // Basic episode metrics
             add_scalar(device, device.logger, "episode/total_steps", state.step_count);
+            add_scalar(device, device.logger, "episode/step_limit", state.episode_step_limit);
             add_scalar(device, device.logger, "episode/final_deaths", state.metrics.death_count);
 
 // Charging behavior metrics
@@ -1714,6 +1763,11 @@ namespace rl_tools {
             // Survival rate
             T survival_rate = T(alive_count) / T(PARAMS::N_AGENTS);
             add_scalar(device, device.logger, "agents/survival_rate", survival_rate);
+
+            // Death-only termination flag: 1 if all agents dead, 0 if episode ended by step limit.
+            // Complements share_terminated, which conflates deaths with randomized step-limit hits.
+            T terminated_by_death = (alive_count == 0 && PARAMS::BATTERY_ENABLED) ? T(1) : T(0);
+            add_scalar(device, device.logger, "episode/terminated_by_death", terminated_by_death);
         }
 
         return terminate;
