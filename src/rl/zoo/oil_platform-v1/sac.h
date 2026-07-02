@@ -20,7 +20,7 @@ namespace rl_tools::rl::zoo::oil_platform_v1::sac {
                 static constexpr TI ACTOR_TRAINING_INTERVAL = 2 * TRAINING_INTERVAL;
                 static constexpr TI CRITIC_TARGET_UPDATE_INTERVAL = 1 * TRAINING_INTERVAL;
                 static constexpr T GAMMA = 0.99;
-                static constexpr bool IGNORE_TERMINATION = false;
+                static constexpr bool IGNORE_TERMINATION = true;
                 static constexpr T TARGET_ENTROPY = -static_cast<T>(6);
                 static constexpr TI SEQUENCE_LENGTH = 1;
                 static constexpr bool ENTROPY_BONUS_NEXT_STEP = false;

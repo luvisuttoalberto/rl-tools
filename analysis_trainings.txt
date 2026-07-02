@@ -143,8 +143,22 @@ NEED LONGER TRAINING: rerun 3.8 and 3.9 with STEP_LIMIT=15000000 BUT KEEPING THE
 2026-05-20_11-58-36: implemented Multi agent sac; relative positions; sentinel at 10, battery_enabled=true, one-hot encoding of agent index to distinguish policies; CHARGER_OCCUPANCY_PENALTY_ACTIVE = true, ABANDONMENT_PENALTY_ACTIVE = true, ABANDONMENT_PENALTY = -0.5, DISASTER_REWARD_SWITCH_ON_DETECTION = true; step 1 + 1.5 + 2 + 2.5 + 3 + 3.5 -> fixed addition of info to the critic (3.5) + 3.6 + 3.7 + 3.8 + 3.9 + STEP_LIMIT=15000000 + 3.11
 2026-05-20_11-59-51: implemented Multi agent sac; relative positions; sentinel at 10, battery_enabled=true, one-hot encoding of agent index to distinguish policies; CHARGER_OCCUPANCY_PENALTY_ACTIVE = true, ABANDONMENT_PENALTY_ACTIVE = true, ABANDONMENT_PENALTY = -0.5, DISASTER_REWARD_SWITCH_ON_DETECTION = true; step 1 + 1.5 + 2 + 2.5 + 3 + 3.5 -> fixed addition of info to the critic (3.5) + 3.6 + 3.7 + 3.8 + 3.9 + STEP_LIMIT=15000000 + 3.11 + 3.12
 
+2026-06-22_12-35-45: changed battery mechanism to be proportional to velocity
+2026-06-24_13-30-31: CHARGING_SHAPING_SCALE = T(0.3);
+2026-06-25_12-23-55: CHARGING_SHAPING_SCALE = T(0.2);
+2026-06-26_12-09-53: CHARGING_SHAPING_SCALE = T(0.1);
+some with collision
+no collision, put ignore_termination = true: good but hovering milking charging bonus
+from now on, all with ignore_termination=true
+2026-06-30_10-58-37: collision back on with ignore_termination= true
+2026-06-30_12-00-03: collision off, potential based reward for charger attraction (small positive rewards)
+2026-07-01_10-42-00: collision on, potential based reward for charger attraction (small positive rewards)
+2026-07-01_10-44-19: collision off, potential based reward for charger attraction (small positive rewards), sigma for disaster = 50
+2026-07-02_12-09-29: collision off, potential based reward for charger attraction (small positive rewards), sigma for disaster = 100
+2026-07-02_12-10-35: collision off, potential based reward for charger attraction (small positive rewards), sigma for disaster = 50, clipping gradient
 
 
+need to retrain all recent trainings with new acceleration discharge
 
 
 

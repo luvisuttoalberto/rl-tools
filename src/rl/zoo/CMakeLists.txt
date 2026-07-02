@@ -180,6 +180,12 @@ target_compile_definitions(rl_zoo_oil_platform-v1_ppo_multi_agent PRIVATE RL_TOO
 target_compile_definitions(rl_zoo_oil_platform-v1_ppo_multi_agent PRIVATE RL_TOOLS_USE_MULTI_AGENT_PPO)
 target_compile_options(rl_zoo_oil_platform-v1_ppo_multi_agent PRIVATE -Ofast -march=native)
 
+# Oil Platform — enjoy (load checkpoint, run rollouts, write CSV)
+add_executable(enjoy_oil_platform enjoy_oil_platform.cpp)
+target_link_libraries(enjoy_oil_platform PRIVATE RLtools::RLtools)
+RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(enjoy_oil_platform)
+target_compile_options(enjoy_oil_platform PRIVATE -O2 -march=native)
+
 if(RL_TOOLS_RL_ENVIRONMENTS_ENABLE_MUJOCO)
     # Ant-v4
     # PPO

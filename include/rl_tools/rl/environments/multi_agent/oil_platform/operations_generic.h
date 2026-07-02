@@ -215,53 +215,31 @@ namespace rl_tools {
 
         if (alive_count == 0 || total_weight < T(1e-6)) return T(0);  // No alive agents or no coverage capacity
 
-        // Sweep through grid cells and assign to nearest agent
-        for (TI gx = 0; gx < PARAMS::GRID_RES; ++gx) {
-            for (TI gy = 0; gy < PARAMS::GRID_RES; ++gy) {
-                T cx_cell = PARAMS::GRID_DX * (gx + T(0.5));
-                T cy_cell = PARAMS::GRID_DY * (gy + T(0.5));
+        // Sweep precomputed ROI cell centres (skips all non-ROI cells)
+        constexpr T SENSOR_RANGE_SQ = PARAMS::SENSOR_RANGE * PARAMS::SENSOR_RANGE;
+        for (TI ri = 0; ri < PARAMS::ROI_SIZE; ++ri) {
+            const T cx_cell = PARAMS::ROI_CATALOGUE[ri].x;
+            const T cy_cell = PARAMS::ROI_CATALOGUE[ri].y;
 
-                // Check if cell is in ROI (platform or pipes)
-                T adx = math::abs(device.math, cx_cell - PARAMS::GRID_CX);
-                T ady = math::abs(device.math, cy_cell - PARAMS::GRID_CY);
+            // Find nearest alive agent to this cell (within sensor range)
+            TI nearest = PARAMS::N_AGENTS;
+            T min_dist_sq = std::numeric_limits<T>::infinity();
 
-                bool in_platform = (adx <= PARAMS::PLATFORM_HALF_SIZE &&
-                                   ady <= PARAMS::PLATFORM_HALF_SIZE);
-                bool in_pipe_h = (ady <= PARAMS::PIPE_WIDTH * T(0.5) &&
-                                 adx >= PARAMS::PLATFORM_HALF_SIZE);
-                bool in_pipe_v = (adx <= PARAMS::PIPE_WIDTH * T(0.5) &&
-                                 ady >= PARAMS::PLATFORM_HALF_SIZE);
+            for (TI i = 0; i < PARAMS::N_AGENTS; ++i) {
+                if (dead[i]) continue;
 
-                if (!(in_platform || in_pipe_h || in_pipe_v)) {
-                    continue;  // Skip non-ROI cells
+                T dx = cx_cell - pos[i][0];
+                T dy = cy_cell - pos[i][1];
+                T dist_sq = dx*dx + dy*dy;
+
+                if (dist_sq < min_dist_sq && dist_sq <= SENSOR_RANGE_SQ) {
+                    min_dist_sq = dist_sq;
+                    nearest = i;
                 }
+            }
 
-                // Find nearest alive agent to this cell (within sensor range)
-                TI nearest = PARAMS::N_AGENTS;
-                T min_dist_sq = std::numeric_limits<T>::infinity();
-                constexpr T SENSOR_RANGE_SQ = PARAMS::SENSOR_RANGE * PARAMS::SENSOR_RANGE;
-
-                for (TI i = 0; i < PARAMS::N_AGENTS; ++i) {
-                    if (dead[i]) continue;
-
-                    T dx = cx_cell - pos[i][0];
-                    T dy = cy_cell - pos[i][1];
-                    T dist_sq = dx*dx + dy*dy;
-
-                    // Only consider agents within sensor range
-                    if (dist_sq < min_dist_sq && dist_sq <= SENSOR_RANGE_SQ) {
-                        min_dist_sq = dist_sq;
-                        nearest = i;
-                    }
-                }
-
-                // Assign cell to nearest agent ONLY if within sensor range
-                // This ensures agents must actually be close to ROI cells to get credit
-                // Similar to Gaussian approach where distance matters (exponential decay)
-                if (nearest < PARAMS::N_AGENTS) {
-                    voronoi_roi_value[nearest] += coverage_weights[nearest];
-                }
-                // If no agent is within sensor range of this cell, it remains uncovered (no reward)
+            if (nearest < PARAMS::N_AGENTS) {
+                voronoi_roi_value[nearest] += coverage_weights[nearest];
             }
         }
 
@@ -297,43 +275,30 @@ namespace rl_tools {
         using PARAMS = typename SPEC::PARAMETERS;
         constexpr TI N = PARAMS::N_AGENTS;
 
-        /* platform & pipe masks pre-computed once */
-        TI total_priority = 0, covered_priority = 0;
-        for (TI gx = 0; gx < PARAMS::GRID_RES; ++gx) {
-            for (TI gy = 0; gy < PARAMS::GRID_RES; ++gy) {
-                T cx_cell = PARAMS::GRID_DX * (gx + T(0.5));
-                T cy_cell = PARAMS::GRID_DY * (gy + T(0.5));
+        // Iterate precomputed ROI cell centres; all entries are priority cells
+        constexpr TI total_priority = PARAMS::ROI_SIZE;
+        TI covered_priority = 0;
+        constexpr T SENSOR_RANGE_SQ = PARAMS::SENSOR_RANGE * PARAMS::SENSOR_RANGE;
+        for (TI ri = 0; ri < PARAMS::ROI_SIZE; ++ri) {
+            const T cx_cell = PARAMS::ROI_CATALOGUE[ri].x;
+            const T cy_cell = PARAMS::ROI_CATALOGUE[ri].y;
 
-                bool in_platform = (std::abs(cx_cell - PARAMS::GRID_CX) <= PARAMS::PLATFORM_HALF_SIZE &&
-                                    std::abs(cy_cell - PARAMS::GRID_CY) <= PARAMS::PLATFORM_HALF_SIZE);
-
-                bool in_pipe_h = (std::abs(cy_cell - PARAMS::GRID_CY) <= PARAMS::PIPE_WIDTH * T(0.5) &&
-                                  std::abs(cx_cell - PARAMS::GRID_CX) >= PARAMS::PLATFORM_HALF_SIZE);
-
-                bool in_pipe_v = (std::abs(cx_cell - PARAMS::GRID_CX) <= PARAMS::PIPE_WIDTH * T(0.5) &&
-                                  std::abs(cy_cell - PARAMS::GRID_CY) >= PARAMS::PLATFORM_HALF_SIZE);
-
-                bool is_priority = in_platform || in_pipe_h || in_pipe_v;
-                if (!is_priority) continue;
-                ++total_priority;
-
-                /* covered if ANY live drone has the cell centre within sensor range */
-                for (TI i = 0; i < N; ++i) {
-                    const auto &d = s_next.drone_states[i];
-                    if (d.dead) continue;
-                    if constexpr (PARAMS::EXCLUDE_CHARGING_FROM_COVERAGE) {
-                        if (d.is_charging) continue;
-                    }
-                    T dist = (d.position[0] - cx_cell) * (d.position[0] - cx_cell)
-                             + (d.position[1] - cy_cell) * (d.position[1] - cy_cell);
-                    if (dist <= PARAMS::SENSOR_RANGE * PARAMS::SENSOR_RANGE) {
-                        ++covered_priority;
-                        break;
-                    }
+            /* covered if ANY live drone has the cell centre within sensor range */
+            for (TI i = 0; i < N; ++i) {
+                const auto &d = s_next.drone_states[i];
+                if (d.dead) continue;
+                if constexpr (PARAMS::EXCLUDE_CHARGING_FROM_COVERAGE) {
+                    if (d.is_charging) continue;
+                }
+                T dist_sq = (d.position[0] - cx_cell) * (d.position[0] - cx_cell)
+                         + (d.position[1] - cy_cell) * (d.position[1] - cy_cell);
+                if (dist_sq <= SENSOR_RANGE_SQ) {
+                    ++covered_priority;
+                    break;
                 }
             }
         }
-        return (total_priority > 0) ? T(covered_priority) / T(total_priority) : T(0);
+        return T(covered_priority) / T(total_priority);
     }
 
 
@@ -390,6 +355,42 @@ namespace rl_tools {
         // Clamp b01 just in case, then return 1 - b01
         T b = math::clamp(device.math, b01, T(0), T(1));
         return T(1) - b;
+    }
+
+    // Potential Φ for potential-based charging shaping (variant 0).
+    // Φ = GAUSS_BETA_CHARGING * CHARGING_SHAPING_SCALE * urgency(battery) * proximity(pos, charger).
+    // The urgency factor mirrors the gate used by the legacy level proximity shaping so the
+    // pull only switches on as the battery drops below CHARGING_SHAPING_BATTERY_THRESHOLD.
+    template<typename DEVICE, typename PARAMS>
+    RL_TOOLS_FUNCTION_PLACEMENT static typename PARAMS::T charging_shaping_potential(
+            DEVICE& device,
+            typename PARAMS::T battery,
+            typename PARAMS::T pos_x, typename PARAMS::T pos_y,
+            typename PARAMS::T charger_x, typename PARAMS::T charger_y)
+    {
+        using T = typename PARAMS::T;
+        T b01 = math::clamp(device.math, battery / T(100), T(0), T(1));
+        T urgency;
+        if constexpr (PARAMS::CHARGING_SHAPING_GATE_ENABLED) {
+            const T threshold = PARAMS::CHARGING_SHAPING_BATTERY_THRESHOLD;
+            if (b01 >= threshold) {
+                urgency = T(0);
+            } else {
+                const T denom = math::max(device.math, threshold, T(1e-6));
+                const T ramp = (threshold - b01) / denom;
+                urgency = math::pow(device.math, ramp, PARAMS::CHARGING_URGENCY_RAMP_POWER);
+            }
+        } else {
+            urgency = T(1) - b01;
+        }
+        urgency = math::clamp(device.math, urgency, T(0), T(1));
+
+        const T dx = pos_x - charger_x;
+        const T dy = pos_y - charger_y;
+        const T dist_sq = dx*dx + dy*dy;
+        const T proximity = math::exp(device.math,
+                -dist_sq / (T(2) * PARAMS::GAUSS_SIGMA_CHARGING * PARAMS::GAUSS_SIGMA_CHARGING));
+        return PARAMS::GAUSS_BETA_CHARGING * PARAMS::CHARGING_SHAPING_SCALE * urgency * proximity;
     }
 
     template<typename DEVICE, typename SPEC, typename RNG>
@@ -482,6 +483,7 @@ namespace rl_tools {
         state.metrics.death_penalty = 0;
         state.metrics.ongoing_death_penalty = 0;
         state.metrics.movement_penalty = 0;
+        state.metrics.charging_potential_shaping = 0;
         state.metrics.per_step_reward = 0;
     }
 
@@ -575,6 +577,7 @@ namespace rl_tools {
         state.metrics.death_penalty = 0;
         state.metrics.ongoing_death_penalty = 0;
         state.metrics.movement_penalty = 0;
+        state.metrics.charging_potential_shaping = 0;
         state.metrics.per_step_reward = 0;
     }
 
@@ -758,7 +761,7 @@ namespace rl_tools {
                 desired_vx = math::clamp(device.math, desired_vx, T(-1), T(1));
                 desired_vy = math::clamp(device.math, desired_vy, T(-1), T(1));
 
-                constexpr T ALPHA = 0.6;                  // 0<α≤1  → smaller α = more inertia
+                constexpr T ALPHA = PARAMS::VELOCITY_FILTER_ALPHA;
                 desired_vx = agent_state.velocity[0] + ALPHA * (desired_vx * PARAMS::MAX_SPEED
                                                                 - agent_state.velocity[0]);
                 desired_vy = agent_state.velocity[1] + ALPHA * (desired_vy * PARAMS::MAX_SPEED
@@ -863,9 +866,26 @@ namespace rl_tools {
                         agent_next_state.battery = math::min(device.math, T(100),
                                                              agent_state.battery + PARAMS::CHARGING_RATE);
                     } else {
-                        // Not charging - apply fixed discharge
+                        // Not charging - apply discharge. Exactly one of VELOCITY_PROPORTIONAL_DISCHARGE
+                        // and ACCELERATION_PROPORTIONAL_DISCHARGE may modulate the base rate; see the
+                        // comments on both flags in oil_platform.h for the calibration each uses. With
+                        // both disabled this reduces to the fixed base discharge.
+                        static_assert(!(PARAMS::VELOCITY_PROPORTIONAL_DISCHARGE && PARAMS::ACCELERATION_PROPORTIONAL_DISCHARGE),
+                                      "VELOCITY_PROPORTIONAL_DISCHARGE and ACCELERATION_PROPORTIONAL_DISCHARGE are mutually exclusive");
+                        T discharge = PARAMS::DISCHARGE_RATE_BASE;
+                        if constexpr (PARAMS::VELOCITY_PROPORTIONAL_DISCHARGE) {
+                            T speed_ratio = velocity_magnitude / PARAMS::MAX_SPEED;
+                            discharge *= T(1) + PARAMS::DISCHARGE_VELOCITY_FRACTION * (T(2) * speed_ratio - T(1));
+                        } else if constexpr (PARAMS::ACCELERATION_PROPORTIONAL_DISCHARGE) {
+                            T delta_vx = agent_next_state.velocity[0] - agent_state.velocity[0];
+                            T delta_vy = agent_next_state.velocity[1] - agent_state.velocity[1];
+                            T delta_v = magnitude(device, delta_vx, delta_vy);
+                            T max_delta_v = T(2) * PARAMS::VELOCITY_FILTER_ALPHA * PARAMS::MAX_SPEED;
+                            T change_ratio = math::clamp(device.math, delta_v / max_delta_v, T(0), T(1));
+                            discharge *= T(1) + PARAMS::DISCHARGE_ACCEL_FRACTION * (T(2) * change_ratio - T(1));
+                        }
                         agent_next_state.battery = math::max(device.math, T(0),
-                                                             agent_state.battery - PARAMS::DISCHARGE_RATE_BASE);
+                                                             agent_state.battery - discharge);
                     }
 
                     // Check if drone dies: either battery = 0 OR can't reach charger in time
@@ -916,6 +936,36 @@ namespace rl_tools {
                     agent_next_state.battery = 100;
                     agent_next_state.is_charging = false;
                     agent_next_state.dead = false;
+                }
+            }
+        }
+
+        // (3b) Inter-drone collisions: any two alive drones closer than the
+        // collision radius both die this step. Uses the integrated next-state
+        // positions and runs before detection so collided drones stop detecting
+        // and are picked up by the death metrics below.
+        if constexpr (PARAMS::DRONE_COLLISION_ENABLED) {
+            constexpr T COLLISION_RADIUS_SQ = PARAMS::DRONE_COLLISION_RADIUS * PARAMS::DRONE_COLLISION_RADIUS;
+            for (TI i = 0; i < N_AGENTS; ++i) {
+                auto &drone_i = next_state.drone_states[i];
+                if (drone_i.dead) continue;
+                for (TI j = i + 1; j < N_AGENTS; ++j) {
+                    auto &drone_j = next_state.drone_states[j];
+                    if (drone_j.dead) continue;
+
+                    T dx = drone_i.position[0] - drone_j.position[0];
+                    T dy = drone_i.position[1] - drone_j.position[1];
+                    if (dx * dx + dy * dy < COLLISION_RADIUS_SQ) {
+                        for (auto *drone : {&drone_i, &drone_j}) {
+                            drone->dead = true;
+                            drone->velocity[0] = 0;
+                            drone->velocity[1] = 0;
+                            drone->is_charging = false;
+                            drone->is_detecting = false;
+                            drone->charge_hold_remaining = 0;
+                        }
+                        break; // drone_i is dead now; stop pairing it with others
+                    }
                 }
             }
         }
@@ -1077,6 +1127,7 @@ namespace rl_tools {
         T fleet_charging_value = 0;       // Sum of battery-weighted charging contributions
         T fleet_coverage_capacity = 0;    // Sum of coverage weights: (1 - battery_urgency) per agent
         T fleet_charging_need = 0;        // Sum of charging weights: battery_urgency per agent
+        T charging_potential_shaping = 0; // Potential-based charging shaping reward (flag-gated; 0 when disabled)
 
         for (TI i = 0; i < N_AGENTS; ++i) {
             const auto& agent_next_state = next_state.drone_states[i];
@@ -1186,21 +1237,41 @@ namespace rl_tools {
             }
 
             // Agent contributes to charging objective proportional to battery need.
-            // For variant 0, keep legacy spatial charging shaping.
+            // Variant 0 keeps the spatial charging "pull" toward the charger, delivered either
+            // as the legacy per-step level reward or, when POTENTIAL_BASED_CHARGING_SHAPING is
+            // set, as potential-based shaping F = gamma*Phi(s') - Phi(s) (removes rim-camping).
             if constexpr (PARAMS::BATTERY_ENABLED) {
                 if constexpr (PARAMS::CHARGING_OBJECTIVE_VARIANT == 0) {
                     if (agent_next_state.is_charging) {
-                        // Agent is actively charging -> full contribution.
+                        // Agent is actively charging -> full contribution (true objective, unchanged).
                         fleet_charging_value += charging_weight;
                     } else if (charging_urgent) {
-                        // Legacy proximity shaping (always-on pull).
-                        T dx_to_charger = agent_next_state.position[0] - state.charging_station_position[0];
-                        T dy_to_charger = agent_next_state.position[1] - state.charging_station_position[1];
-                        T dist_to_charger_squared = dx_to_charger*dx_to_charger + dy_to_charger*dy_to_charger;
-                        T charging_proximity = math::exp(device.math, -(dist_to_charger_squared) /
-                                                         (T(2) * PARAMS::GAUSS_SIGMA_CHARGING * PARAMS::GAUSS_SIGMA_CHARGING));
+                        if constexpr (!PARAMS::POTENTIAL_BASED_CHARGING_SHAPING) {
+                            // Legacy level proximity shaping (always-on pull; milkable by camping).
+                            T dx_to_charger = agent_next_state.position[0] - state.charging_station_position[0];
+                            T dy_to_charger = agent_next_state.position[1] - state.charging_station_position[1];
+                            T dist_to_charger_squared = dx_to_charger*dx_to_charger + dy_to_charger*dy_to_charger;
+                            T charging_proximity = math::exp(device.math, -(dist_to_charger_squared) /
+                                                             (T(2) * PARAMS::GAUSS_SIGMA_CHARGING * PARAMS::GAUSS_SIGMA_CHARGING));
 
-                        fleet_charging_value += charging_weight * charging_proximity * PARAMS::CHARGING_SHAPING_SCALE;
+                            fleet_charging_value += charging_weight * charging_proximity * PARAMS::CHARGING_SHAPING_SCALE;
+                        }
+                    }
+
+                    if constexpr (PARAMS::POTENTIAL_BASED_CHARGING_SHAPING) {
+                        // Potential-based proximity pull: only *changes* in Phi are rewarded, so holding
+                        // position near the charger nets ~0 and cannot be farmed. Evaluated for every
+                        // alive agent each step so the potential differences telescope cleanly.
+                        const auto& agent_cur_state = state.drone_states[i];
+                        const T phi_next = charging_shaping_potential<DEVICE, PARAMS>(device,
+                                agent_next_state.battery,
+                                agent_next_state.position[0], agent_next_state.position[1],
+                                state.charging_station_position[0], state.charging_station_position[1]);
+                        const T phi_cur = charging_shaping_potential<DEVICE, PARAMS>(device,
+                                agent_cur_state.battery,
+                                agent_cur_state.position[0], agent_cur_state.position[1],
+                                state.charging_station_position[0], state.charging_station_position[1]);
+                        charging_potential_shaping += PARAMS::CHARGING_SHAPING_POTENTIAL_GAMMA * phi_next - phi_cur;
                     }
                 }
             }
@@ -1403,11 +1474,11 @@ namespace rl_tools {
         }
 
 //        T total_reward = coverage_penalty + charging_penalty + temporal_penalty + death_penalty + ongoing_death_penalty + movement_penalty + repulsion_penalty;
-        T total_reward = coverage_penalty + charging_penalty + repulsion_penalty + charger_occupancy_penalty + abandonment_penalty + death_penalty + ongoing_death_penalty + movement_penalty;
+        T total_reward = coverage_penalty + charging_penalty + repulsion_penalty + charger_occupancy_penalty + abandonment_penalty + death_penalty + ongoing_death_penalty + movement_penalty + charging_potential_shaping;
 
         utils::assert_exit(device, !math::is_nan(device.math, total_reward), "reward is nan");
 
-        if(!next_state.disaster.active){
+        if(!next_state.disaster.active && (static_cast<int>(next_state.step_count) % 10 == 0)){
             T cov = priority_area_coverage<DEVICE,SPEC>(device, next_state);
             next_state.metrics.total_coverage_ratio =
                     state.metrics.total_coverage_ratio + cov;
@@ -1429,6 +1500,7 @@ namespace rl_tools {
         next_state.metrics.death_penalty = death_penalty;
         next_state.metrics.ongoing_death_penalty = ongoing_death_penalty;
         next_state.metrics.movement_penalty = movement_penalty;
+        next_state.metrics.charging_potential_shaping = charging_potential_shaping;
 
         return total_reward;
     }

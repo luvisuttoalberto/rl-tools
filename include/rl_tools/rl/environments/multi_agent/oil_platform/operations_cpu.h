@@ -39,7 +39,8 @@ namespace rl_tools {
         result += "\"CHARGING_STATION_POSITION_X\":" + std::to_string(SPEC::PARAMETERS::CHARGING_STATION_POSITION_X) + ",";
         result += "\"CHARGING_STATION_POSITION_Y\":" + std::to_string(SPEC::PARAMETERS::CHARGING_STATION_POSITION_Y) + ",";
         result += "\"CHARGING_STATION_RANGE\":" + std::to_string(SPEC::PARAMETERS::CHARGING_STATION_RANGE) + ",";
-        result += "\"CHARGING_OBJECTIVE_VARIANT\":" + std::to_string(SPEC::PARAMETERS::CHARGING_OBJECTIVE_VARIANT);
+        result += "\"CHARGING_OBJECTIVE_VARIANT\":" + std::to_string(SPEC::PARAMETERS::CHARGING_OBJECTIVE_VARIANT) + ",";
+        result += "\"MAX_SPEED\":" + std::to_string(SPEC::PARAMETERS::MAX_SPEED);
         result += "}";
         return result;
     }
@@ -102,7 +103,8 @@ namespace rl_tools {
         result += "\"abandonment_penalty\": " + std::to_string(state.metrics.abandonment_penalty) + ",";
         result += "\"death_penalty\": " + std::to_string(state.metrics.death_penalty) + ",";
         result += "\"ongoing_death_penalty\": " + std::to_string(state.metrics.ongoing_death_penalty) + ",";
-        result += "\"movement_penalty\": " + std::to_string(state.metrics.movement_penalty);
+        result += "\"movement_penalty\": " + std::to_string(state.metrics.movement_penalty) + ",";
+        result += "\"charging_potential_shaping\": " + std::to_string(state.metrics.charging_potential_shaping);
         result += "}";
         return result;
     }
@@ -219,9 +221,10 @@ export async function render(ui_state, parameters, state, action) {
     ctx.strokeRect(centerX - pipeWidth/2, 0, pipeWidth, height);
 
     // Draw charging base (green circle at origin)
+    const chargerRadius = Math.max(width * 0.018, 8);
     ctx.fillStyle = 'rgba(100, 200, 100, 0.7)';
     ctx.beginPath();
-    ctx.arc(chargeX * scaleX, chargeY * scaleY, scaleX * 0.7, 0, Math.PI * 2);
+    ctx.arc(chargeX * scaleX, chargeY * scaleY, chargerRadius, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = '#008800';
     ctx.lineWidth = 1.5;
@@ -269,7 +272,8 @@ export async function render(ui_state, parameters, state, action) {
             ['Abandonment Penalty', state.abandonment_penalty],
             ['Death Penalty', state.death_penalty],
             ['Ongoing Death Penalty', state.ongoing_death_penalty],
-            ['Movement Penalty', state.movement_penalty]
+            ['Movement Penalty', state.movement_penalty],
+            ['Charging Potential Shaping', state.charging_potential_shaping]
         ];
 
         let lineIndex = 0;
@@ -316,7 +320,7 @@ export async function render(ui_state, parameters, state, action) {
 
     // Draw drones
     if (state.drone_states) {
-        const droneRadius = 0.35 * scaleX;
+        const droneRadius = Math.max(width * 0.018, 8);
 
         for (let i = 0; i < state.drone_states.length; i++) {
             const drone = state.drone_states[i];
@@ -351,9 +355,10 @@ export async function render(ui_state, parameters, state, action) {
 
             // Draw velocity vector if drone is moving
             if (!drone.dead && (Math.abs(drone.velocity[0]) > 0.01 || Math.abs(drone.velocity[1]) > 0.01)) {
-                const velocityScale = 3; // Scale factor for velocity visualization
-                const vx = drone.velocity[0] * velocityScale * scaleX;
-                const vy = drone.velocity[1] * velocityScale * scaleY;
+                const maxSpeed = parameters.MAX_SPEED || 2.0;
+                const velocityScale = (width * 0.06) / maxSpeed; // Arrow at max speed = 6% of canvas width
+                const vx = drone.velocity[0] * velocityScale;
+                const vy = drone.velocity[1] * velocityScale;
 
                 // Draw velocity arrow
                 ctx.strokeStyle = drone.is_charging ? '#90EE90' : '#FF6B6B';

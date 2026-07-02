@@ -23,6 +23,11 @@ namespace rl_tools {
 
                         static constexpr bool BATTERY_ENABLED = true;
 
+                        // Inter-drone collisions: when enabled, any two alive drones that get
+                        // closer than DRONE_COLLISION_RADIUS (meters) both die on that step.
+                        static constexpr bool DRONE_COLLISION_ENABLED = false;
+                        static constexpr T DRONE_COLLISION_RADIUS = T(2.0);
+
                         // Voronoi coverage
                         static constexpr bool USE_VORONOI_COVERAGE = true;  // Toggle: true=Voronoi, false=Gaussian
                         static constexpr T VORONOI_VARIANCE_PENALTY_WEIGHT = T(0.3);  // Weight for distribution uniformity penalty
@@ -39,17 +44,21 @@ namespace rl_tools {
                         static constexpr TI N_AGENTS = 3;
 
                         // Sensing & motion
-                        static constexpr T SENSOR_RANGE = 5.0;
+                        static constexpr T SENSOR_RANGE = 50.0;
                         static constexpr T DT = 0.05;
                         static constexpr T MAX_ACCELERATION = 2.0;
-                        static constexpr T MAX_SPEED = 2.0;
+                        static constexpr T MAX_SPEED = 20.0;
+                        // Inertia filter coefficient applied to velocity each step (0<alpha<=1,
+                        // smaller alpha = more inertia). Also used by the discharge model below,
+                        // which needs it to bound the maximum per-step velocity change.
+                        static constexpr T VELOCITY_FILTER_ALPHA = T(0.6);
 
                         // Geometry of platform & pipes
                         // Square platform at center, half-size
-                        static constexpr T PLATFORM_HALF_SIZE = 2.0;
-                        static constexpr T PIPE_WIDTH = 2.0;
-                        static constexpr TI GRID_SIZE_X = 20;
-                        static constexpr TI GRID_SIZE_Y = 20;
+                        static constexpr T PLATFORM_HALF_SIZE = 20.0;
+                        static constexpr T PIPE_WIDTH = 20.0;
+                        static constexpr TI GRID_SIZE_X = 200;
+                        static constexpr TI GRID_SIZE_Y = 200;
 
                         static constexpr TI GRID_RES = 20;
                         // Grid parameters (derived from GRID_SIZE_* and GRID_RES)
@@ -72,7 +81,7 @@ namespace rl_tools {
                         static constexpr TI EPISODE_STEP_LIMIT_MAX = 1300;
 
                         // Disaster parameters
-                        static constexpr T DISASTER_MAX_SPEED = 1.0;
+                        static constexpr T DISASTER_MAX_SPEED = 10.0;
                         static constexpr TI DISASTER_MINIMUM_SPAWN_STEP = 0;
                         static constexpr T DISASTER_PROBABILITY_SPAWN = 0.01;
                         // static constexpr T DISASTER_PROBABILITY_SPAWN = 0.;
@@ -89,11 +98,11 @@ namespace rl_tools {
                         // Charging parameters
                         static constexpr T CHARGING_RATE = 1.0;
 //                        static constexpr T DISCHARGE_RATE = 0.15;
-                        static constexpr T CHARGING_STATION_RANGE = 2.0;
-                        static constexpr T CHARGING_VELOCITY_THRESHOLD = 0.75;
+                        static constexpr T CHARGING_STATION_RANGE = 20.0;
+                        static constexpr T CHARGING_VELOCITY_THRESHOLD = 7.5;
                         static constexpr bool RANDOMIZE_CHARGING_STATION_POSITION = false;
-                        static constexpr T CHARGING_STATION_POSITION_X = 5.0;
-                        static constexpr T CHARGING_STATION_POSITION_Y = 5.0;
+                        static constexpr T CHARGING_STATION_POSITION_X = 50.0;
+                        static constexpr T CHARGING_STATION_POSITION_Y = 50.0;
                         static constexpr T MINIMUM_BATTERY_FOR_CHARGING = 80.0;
                         // static constexpr T CHARGING_ACCELERATION_THRESHOLD = 0.5;
 
@@ -110,7 +119,7 @@ namespace rl_tools {
 
 
                         static constexpr T GAUSS_SIGMA_COVER = SENSOR_RANGE/2;          // pre-disaster
-                        static constexpr T GAUSS_SIGMA_EVENT = 10.0;    // post-spawn
+                        static constexpr T GAUSS_SIGMA_EVENT = 100.0;   // post-spawn
                         // static constexpr T GAUSS_SIGMA_EVENT = SENSOR_RANGE/3;    // post-spawn
                         static constexpr T GAUSS_BETA_COVER        = 1.0;   //Coverage reward
                         static constexpr T GAUSS_BETA_EVENT        = 1.0;  // Disaster detection reward
@@ -137,10 +146,48 @@ namespace rl_tools {
 
                         // Battery and charging parameters
                         static constexpr T DISCHARGE_RATE_BASE = T(0.15);
+                        // Velocity-proportional discharge. When both this and
+                        // ACCELERATION_PROPORTIONAL_DISCHARGE below are false, discharge is exactly
+                        // DISCHARGE_RATE_BASE per step (identical to the original implementation).
+                        // When true, discharge is modulated around DISCHARGE_RATE_BASE so that
+                        // the midpoint speed (MAX_SPEED/2) still drains exactly DISCHARGE_RATE_BASE:
+                        //   discharge = DISCHARGE_RATE_BASE * (1 + frac * (2*speed/MAX_SPEED - 1))
+                        // i.e. a stationary drone drains BASE*(1-frac), a full-speed drone
+                        // drains BASE*(1+frac), even while cruising at constant speed. Superseded by
+                        // ACCELERATION_PROPORTIONAL_DISCHARGE below as the physically motivated
+                        // model; kept for ablations. The two flags are mutually exclusive.
+                        static constexpr bool VELOCITY_PROPORTIONAL_DISCHARGE = false;
+                        static constexpr T DISCHARGE_VELOCITY_FRACTION = T(0.5);
+                        // Acceleration-proportional discharge. Modulates DISCHARGE_RATE_BASE by how
+                        // much the velocity vector changed this step, |v_next - v_prev|, normalized
+                        // by the largest change the inertia filter can produce in one step
+                        // (2 * VELOCITY_FILTER_ALPHA * MAX_SPEED, a full reversal from +MAX_SPEED to
+                        // -MAX_SPEED):
+                        //   discharge = DISCHARGE_RATE_BASE * (1 + frac * (2*change_ratio - 1))
+                        // i.e. a drone holding speed and heading drains BASE*(1-frac) regardless of
+                        // how fast it is going, while one reversing direction at full speed drains
+                        // BASE*(1+frac). Unlike VELOCITY_PROPORTIONAL_DISCHARGE, cruising at a
+                        // constant speed no longer costs extra energy; only accelerating, braking,
+                        // and turning do.
+                        static constexpr bool ACCELERATION_PROPORTIONAL_DISCHARGE = true;
+                        static constexpr T DISCHARGE_ACCEL_FRACTION = T(0.5);
                         // static constexpr T GAUSS_SIGMA_CHARGING = CHARGING_STATION_RANGE;
-                        static constexpr T GAUSS_SIGMA_CHARGING = 5.0;
+                        static constexpr T GAUSS_SIGMA_CHARGING = 50.0;
                         static constexpr T GAUSS_BETA_CHARGING = 1.0;
                         static constexpr T CHARGING_SHAPING_SCALE = T(0.3);
+                        // Potential-based charging shaping (variant 0 only). When true, the spatial
+                        // pull toward the charger is delivered as potential-based shaping
+                        // F = gamma*Phi(s') - Phi(s), with Phi = GAUSS_BETA_CHARGING * CHARGING_SHAPING_SCALE
+                        // * urgency(battery) * proximity(pos), instead of a per-step level reward. Only
+                        // changes in Phi are rewarded, so camping just outside the charging range nets ~0
+                        // and can no longer be farmed, while the pull toward the charger is preserved.
+                        // CHARGING_SHAPING_SCALE still sets the pull strength (shared with the legacy term).
+                        // Set false to restore the legacy level proximity shaping (unchanged behavior).
+                        static constexpr bool POTENTIAL_BASED_CHARGING_SHAPING = true;
+                        // Discount used inside the potential-based shaping term. 1.0 makes holding a
+                        // position exactly neutral (cleanest "no milk"); set to the training discount
+                        // (e.g. 0.99) for strict policy-invariance with the RL objective.
+                        static constexpr T CHARGING_SHAPING_POTENTIAL_GAMMA = T(1.0);
                         // Charging objective selector:
                         // 0 -> legacy Gaussian proximity shaping
                         // 1 -> non-spatial battery risk penalty only
@@ -406,6 +453,7 @@ namespace rl_tools {
                         T death_penalty;
                         T ongoing_death_penalty;
                         T movement_penalty;
+                        T charging_potential_shaping;
 
                         T per_step_reward;
                     };
