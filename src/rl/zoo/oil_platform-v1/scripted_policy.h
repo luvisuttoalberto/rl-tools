@@ -67,8 +67,11 @@ namespace rl_tools::rl::zoo::oil_platform_v1::scripted {
         using CHANGE_BATCH_SIZE = ScriptedPolicy<TYPE_POLICY, TI, ENVIRONMENT, NEW_BATCH_SIZE>;
 
         // --- tuning constants (world units: meters, m/s, battery in %) ---
-        static constexpr T CHARGE_ENTER_BATTERY = 35;     // request charging below this
-        static constexpr T CHARGE_CRITICAL_BATTERY = 20;  // ignore the occupancy tie-break below this
+        // Sized for DISCHARGE_RATE_BASE=0.30 (hover/cruise drain 0.15/step): the worst-case
+        // ~130-step transit from the tour to the charger costs ~20 battery, so the critical
+        // threshold must leave that as reserve.
+        static constexpr T CHARGE_ENTER_BATTERY = 40;     // request charging below this
+        static constexpr T CHARGE_CRITICAL_BATTERY = 25;  // ignore the occupancy tie-break below this
         static constexpr T CHARGE_TIE_EPSILON = 0.5;      // batteries closer than this are tied (tie-break by index)
         static constexpr T TOUR_RADIUS = 75;              // L1 radius of the diamond tour around the platform
         static constexpr T WAYPOINT_CAPTURE_RADIUS = 15;  // advance to the next waypoint within this distance

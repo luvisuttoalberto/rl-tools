@@ -145,7 +145,12 @@ namespace rl_tools {
                         static constexpr TI MINIMUM_COVERAGE_STEPS = 100;  // Minimum steps before disaster to count as valid coverage episode
 
                         // Battery and charging parameters
-                        static constexpr T DISCHARGE_RATE_BASE = T(0.15);
+                        // 0.30 with ACCELERATION_PROPORTIONAL_DISCHARGE (frac 0.5) gives a hover/cruise drain
+                        // of 0.15/step: ~430 steps of endurance from full battery to a 35% reserve, i.e. ~2
+                        // charge cycles per drone per mean (1000-step) episode and ~50% single-charger
+                        // occupancy across 3 drones. The previous 0.15 let a stationary drone survive ~930
+                        // steps, making the battery constraint non-binding at the current episode lengths.
+                        static constexpr T DISCHARGE_RATE_BASE = T(0.30);
                         // Velocity-proportional discharge. When both this and
                         // ACCELERATION_PROPORTIONAL_DISCHARGE below are false, discharge is exactly
                         // DISCHARGE_RATE_BASE per step (identical to the original implementation).
@@ -234,6 +239,17 @@ namespace rl_tools {
                         // Abandonment penalty: penalize every step the disaster is known but no agent observes it
                         static constexpr bool ABANDONMENT_PENALTY_ACTIVE = true;
                         static constexpr T ABANDONMENT_PENALTY = -0.5;
+
+                        // Undetected-disaster penalty: penalize every step a disaster is active but has
+                        // not yet been detected for the first time. Complements ABANDONMENT_PENALTY,
+                        // which only fires after a detection has been lost. Without it, a fully missed
+                        // disaster costs zero reward, so a stationary coverage-optimal policy is never
+                        // incentivized to sweep. Magnitude -1.0 = one agent-equivalent of coverage per
+                        // step (GAUSS_BETA_COVER * 1): an unseen disaster costs as much as one drone
+                        // contributing nothing. The actor cannot observe an undetected disaster; the
+                        // penalty is attributed through the privileged critic (sees disaster_active).
+                        static constexpr bool UNDETECTED_DISASTER_PENALTY_ACTIVE = false;
+                        static constexpr T UNDETECTED_DISASTER_PENALTY = -1.0;
 
                         // ---- Multi-center Gaussian reward (platform + 4 arms) -----------------
 
@@ -450,6 +466,7 @@ namespace rl_tools {
                         T repulsion_penalty;
                         T charger_occupancy_penalty;
                         T abandonment_penalty;
+                        T undetected_disaster_penalty;
                         T death_penalty;
                         T ongoing_death_penalty;
                         T movement_penalty;

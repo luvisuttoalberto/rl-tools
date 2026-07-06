@@ -480,6 +480,7 @@ namespace rl_tools {
         state.metrics.repulsion_penalty = 0;
         state.metrics.charger_occupancy_penalty = 0;
         state.metrics.abandonment_penalty = 0;
+        state.metrics.undetected_disaster_penalty = 0;
         state.metrics.death_penalty = 0;
         state.metrics.ongoing_death_penalty = 0;
         state.metrics.movement_penalty = 0;
@@ -574,6 +575,7 @@ namespace rl_tools {
         state.metrics.repulsion_penalty = 0;
         state.metrics.charger_occupancy_penalty = 0;
         state.metrics.abandonment_penalty = 0;
+        state.metrics.undetected_disaster_penalty = 0;
         state.metrics.death_penalty = 0;
         state.metrics.ongoing_death_penalty = 0;
         state.metrics.movement_penalty = 0;
@@ -1430,6 +1432,15 @@ namespace rl_tools {
             }
         }
 
+        // Undetected-disaster penalty: fires every step a disaster is active but has not yet
+        // been detected for the first time (complementary to the abandonment penalty above).
+        T undetected_disaster_penalty = T(0);
+        if constexpr (PARAMS::UNDETECTED_DISASTER_PENALTY_ACTIVE) {
+            if (next_state.disaster.active && !next_state.disaster_detected_global) {
+                undetected_disaster_penalty = PARAMS::UNDETECTED_DISASTER_PENALTY;
+            }
+        }
+
         T death_penalty = T(0);
         TI dead_count = 0;
         if constexpr (PARAMS::BATTERY_ENABLED) {
@@ -1474,7 +1485,7 @@ namespace rl_tools {
         }
 
 //        T total_reward = coverage_penalty + charging_penalty + temporal_penalty + death_penalty + ongoing_death_penalty + movement_penalty + repulsion_penalty;
-        T total_reward = coverage_penalty + charging_penalty + repulsion_penalty + charger_occupancy_penalty + abandonment_penalty + death_penalty + ongoing_death_penalty + movement_penalty + charging_potential_shaping;
+        T total_reward = coverage_penalty + charging_penalty + repulsion_penalty + charger_occupancy_penalty + abandonment_penalty + undetected_disaster_penalty + death_penalty + ongoing_death_penalty + movement_penalty + charging_potential_shaping;
 
         utils::assert_exit(device, !math::is_nan(device.math, total_reward), "reward is nan");
 
@@ -1497,6 +1508,7 @@ namespace rl_tools {
         next_state.metrics.repulsion_penalty = repulsion_penalty;
         next_state.metrics.charger_occupancy_penalty = charger_occupancy_penalty;
         next_state.metrics.abandonment_penalty = abandonment_penalty;
+        next_state.metrics.undetected_disaster_penalty = undetected_disaster_penalty;
         next_state.metrics.death_penalty = death_penalty;
         next_state.metrics.ongoing_death_penalty = ongoing_death_penalty;
         next_state.metrics.movement_penalty = movement_penalty;

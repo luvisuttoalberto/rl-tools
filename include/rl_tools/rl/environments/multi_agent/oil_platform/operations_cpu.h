@@ -101,6 +101,7 @@ namespace rl_tools {
         result += "\"repulsion_penalty\": " + std::to_string(state.metrics.repulsion_penalty) + ",";
         result += "\"charger_occupancy_penalty\": " + std::to_string(state.metrics.charger_occupancy_penalty) + ",";
         result += "\"abandonment_penalty\": " + std::to_string(state.metrics.abandonment_penalty) + ",";
+        result += "\"undetected_disaster_penalty\": " + std::to_string(state.metrics.undetected_disaster_penalty) + ",";
         result += "\"death_penalty\": " + std::to_string(state.metrics.death_penalty) + ",";
         result += "\"ongoing_death_penalty\": " + std::to_string(state.metrics.ongoing_death_penalty) + ",";
         result += "\"movement_penalty\": " + std::to_string(state.metrics.movement_penalty) + ",";
@@ -270,6 +271,7 @@ export async function render(ui_state, parameters, state, action) {
             ['Repulsion Penalty', state.repulsion_penalty],
             ['Charger Occupancy Penalty', state.charger_occupancy_penalty],
             ['Abandonment Penalty', state.abandonment_penalty],
+            ['Undetected Disaster Penalty', state.undetected_disaster_penalty],
             ['Death Penalty', state.death_penalty],
             ['Ongoing Death Penalty', state.ongoing_death_penalty],
             ['Movement Penalty', state.movement_penalty],
