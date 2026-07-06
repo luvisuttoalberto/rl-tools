@@ -186,6 +186,18 @@ target_link_libraries(enjoy_oil_platform PRIVATE RLtools::RLtools)
 RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(enjoy_oil_platform)
 target_compile_options(enjoy_oil_platform PRIVATE -O2 -march=native)
 
+# Oil Platform — scripted baseline (non-learning policy, zoo-compatible artifacts)
+add_executable(baseline_oil_platform baseline_oil_platform.cpp)
+target_link_libraries(baseline_oil_platform PRIVATE RLtools::RLtools)
+RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(baseline_oil_platform)
+target_compile_options(baseline_oil_platform PRIVATE -O2 -march=native)
+
+# Oil Platform — checkpoint evaluation (zoo-compatible artifacts, comparable to the scripted baseline)
+add_executable(evaluate_oil_platform evaluate_oil_platform.cpp)
+target_link_libraries(evaluate_oil_platform PRIVATE RLtools::RLtools)
+RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(evaluate_oil_platform)
+target_compile_options(evaluate_oil_platform PRIVATE -O2 -march=native)
+
 if(RL_TOOLS_RL_ENVIRONMENTS_ENABLE_MUJOCO)
     # Ant-v4
     # PPO

@@ -11,11 +11,13 @@
 //   agent<i>_battery, agent<i>_dead, agent<i>_charging, agent<i>_detecting
 
 #include <rl_tools/operations/cpu_mux.h>
+#include <rl_tools/nn/optimizers/adam/instance/operations_generic.h>
 #include <rl_tools/nn/operations_cpu_mux.h>
 #include <rl_tools/nn/layers/sample_and_squash/operations_generic.h>
 #include <rl_tools/nn_models/mlp/operations_generic.h>
 #include <rl_tools/nn_models/sequential/operations_generic.h>
 #include <rl_tools/nn_models/multi_agent_wrapper/operations_generic.h>
+#include <rl_tools/nn/optimizers/adam/operations_generic.h>
 #include <rl_tools/numeric_types/policy.h>
 
 #include <rl_tools/nn/layers/sample_and_squash/persist.h>
@@ -28,7 +30,8 @@
 #include "oil_platform-v1/per_agent_actor.h"
 #include "oil_platform-v1/sac.h"
 
-#include <HighFive/HighFive.hpp>
+#include <rl_tools/persist/backends/hdf5/operations_cpu.h>
+#include <highfive/H5File.hpp>
 #include <CLI/CLI.hpp>
 
 #include <iostream>
@@ -48,7 +51,7 @@ using TYPE_POLICY      = rlt::numeric_types::Policy<float, PARAMETER_POLICY>;
 using FACTORY          = rlt::rl::zoo::oil_platform_v1::sac::FACTORY<DEVICE, TYPE_POLICY, TI, RNG>;
 using LOOP_CORE_CONFIG = typename FACTORY::LOOP_CORE_CONFIG;
 using ENVIRONMENT      = typename FACTORY::ENVIRONMENT;
-using ACTOR            = typename LOOP_CORE_CONFIG::NN::ACTOR_TYPE::template CHANGE_CAPABILITY<rlt::nn::capability::Forward>;
+using ACTOR            = typename LOOP_CORE_CONFIG::NN::ACTOR_TYPE::template CHANGE_CAPABILITY<rlt::nn::capability::Forward<>>;
 
 static constexpr TI N_AGENTS   = ENVIRONMENT::N_AGENTS;
 static constexpr TI OBS_DIM    = ENVIRONMENT::Observation::DIM;
@@ -116,11 +119,12 @@ int main(int argc, char** argv) {
     // Load actor
     ACTOR actor;
     typename ACTOR::template Buffer<1> actor_buffer;
-    rlt::malloc(device, actor);
-    rlt::malloc(device, actor_buffer);
+    malloc(device, actor);
+    malloc(device, actor_buffer);
 
     auto hdf5_file = HighFive::File(checkpoint_path, HighFive::File::ReadOnly);
-    bool ok = rlt::load(device, actor, hdf5_file.getGroup("actor"));
+    auto actor_group = rlt::get_group(device, hdf5_file, "actor");
+    bool ok = rlt::load(device, actor, actor_group);
     if (!ok) {
         std::cerr << "Failed to load actor from: " << checkpoint_path << "\n";
         return 1;
@@ -136,7 +140,7 @@ int main(int argc, char** argv) {
     rlt::malloc(device, action);
 
     typename ACTOR::template State<false> actor_state;
-    rlt::malloc(device, actor_state);
+    malloc(device, actor_state);
 
     // Open output
     std::ofstream out_file;
@@ -169,7 +173,7 @@ int main(int argc, char** argv) {
             rlt::initial_state(device, env, parameters, state);
         }
 
-        rlt::reset(device, actor, actor_state, rng);
+        reset(device, actor, actor_state, rng);
 
         T ep_return = 0;
         TI ep_steps = 0;
@@ -184,7 +188,7 @@ int main(int argc, char** argv) {
             // Convert to tensor for evaluate_step
             auto obs_tensor = rlt::to_tensor(device, observation);
             auto act_tensor = rlt::to_tensor(device, action);
-            rlt::evaluate_step(device, actor, obs_tensor, actor_state, act_tensor,
+            evaluate_step(device, actor, obs_tensor, actor_state, act_tensor,
                                actor_buffer, rng, rlt::Mode<rlt::mode::Evaluation<>>{});
 
             // Step
@@ -211,11 +215,11 @@ int main(int argc, char** argv) {
     std::cerr << "Mean return: " << (total_return / n_episodes)
               << "  Mean steps: " << (static_cast<T>(total_steps) / n_episodes) << "\n";
 
-    rlt::free(device, actor);
-    rlt::free(device, actor_buffer);
+    free(device, actor);
+    free(device, actor_buffer);
     rlt::free(device, observation);
     rlt::free(device, action);
-    rlt::free(device, actor_state);
+    free(device, actor_state);
 
     return 0;
 }
