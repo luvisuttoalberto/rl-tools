@@ -1817,14 +1817,14 @@ namespace rl_tools {
                            avg_step_pot);
             }
 
+            // Latency is measured conditional on detection: log it only for episodes that detected
+            // something, so a placeholder is never averaged in. Whether detection happened at all is
+            // carried by disaster/detection_rate, disaster/total_missed, and disaster/events_detected.
             if (state.metrics.detection_count > 0) {
                 T avg_latency = static_cast<T>(state.metrics.cumulative_detection_latency) /
                                 state.metrics.detection_count;
                 add_scalar(device, device.logger,
                            "disaster/avg_detection_latency",  avg_latency);
-            } else{
-                add_scalar(device, device.logger,
-                           "disaster/avg_detection_latency",  300);
             }
             add_scalar(device, device.logger,
                        "disaster/events_detected", state.metrics.detection_count);
