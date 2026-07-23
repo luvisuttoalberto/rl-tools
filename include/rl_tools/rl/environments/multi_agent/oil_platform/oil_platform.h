@@ -448,6 +448,8 @@ namespace rl_tools {
                         TI total_charging_sessions;
                         TI appropriate_charging_count;
                         TI inappropriate_charging_count;
+                        TI cumulative_charging_agents;  // sum over steps of #agents charging -> mean occupancy
+                        TI multi_charging_steps;        // steps with >1 agent charging -> group-charging fraction
                         TI death_count;
                         T  cumulative_potential_reward;
                         TI potential_steps;

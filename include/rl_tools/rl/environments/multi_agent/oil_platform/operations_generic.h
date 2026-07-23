@@ -462,6 +462,8 @@ namespace rl_tools {
         state.metrics.total_charging_sessions = 0;
         state.metrics.appropriate_charging_count = 0;
         state.metrics.inappropriate_charging_count = 0;
+        state.metrics.cumulative_charging_agents = 0;
+        state.metrics.multi_charging_steps = 0;
         state.metrics.death_count = 0;
         state.metrics.cumulative_potential_reward = 0;
         state.metrics.potential_steps = 0;
@@ -558,6 +560,8 @@ namespace rl_tools {
         state.metrics.total_charging_sessions = 0;
         state.metrics.appropriate_charging_count = 0;
         state.metrics.inappropriate_charging_count = 0;
+        state.metrics.cumulative_charging_agents = 0;
+        state.metrics.multi_charging_steps = 0;
         state.metrics.death_count = 0;
         state.metrics.cumulative_potential_reward = 0;
         state.metrics.potential_steps = 0;
@@ -1469,16 +1473,21 @@ namespace rl_tools {
             }
         }
 
+        // Count agents currently charging (shared by the occupancy penalty and the occupancy metric).
+        TI charging_count = 0;
+        for (TI i = 0; i < N_AGENTS; ++i) {
+            if (!next_state.drone_states[i].dead && next_state.drone_states[i].is_charging) {
+                ++charging_count;
+            }
+        }
+        // Charger occupancy metric accumulators (logged per episode, independent of the penalty flag).
+        next_state.metrics.cumulative_charging_agents = state.metrics.cumulative_charging_agents + charging_count;
+        next_state.metrics.multi_charging_steps = state.metrics.multi_charging_steps + (charging_count > 1 ? 1 : 0);
+
         // Charger occupancy penalty: penalise each agent beyond the first that is simultaneously charging.
         // Encourages turn-taking rather than group charging visits.
         T charger_occupancy_penalty = T(0);
         if constexpr (PARAMS::CHARGER_OCCUPANCY_PENALTY_ACTIVE) {
-            TI charging_count = 0;
-            for (TI i = 0; i < N_AGENTS; ++i) {
-                if (!next_state.drone_states[i].dead && next_state.drone_states[i].is_charging) {
-                    ++charging_count;
-                }
-            }
             if (charging_count > 1) {
                 charger_occupancy_penalty = -PARAMS::CHARGER_OCCUPANCY_BETA * T(charging_count - 1);
             }
@@ -1770,6 +1779,14 @@ namespace rl_tools {
                 T charging_efficiency = static_cast<T>(state.metrics.appropriate_charging_count) /
                                         static_cast<T>(state.metrics.total_charging_sessions);
                 add_scalar(device, device.logger, "charging/efficiency", charging_efficiency);
+            }
+
+            // Charger occupancy (per-episode; independent of the occupancy-penalty flag)
+            if (state.step_count > 0) {
+                add_scalar(device, device.logger, "charging/mean_occupancy",
+                           static_cast<T>(state.metrics.cumulative_charging_agents) / static_cast<T>(state.step_count));
+                add_scalar(device, device.logger, "charging/group_charging_step_fraction",
+                           static_cast<T>(state.metrics.multi_charging_steps) / static_cast<T>(state.step_count));
             }
 
             // Only log if disaster never spawned or spawned after minimum coverage time
