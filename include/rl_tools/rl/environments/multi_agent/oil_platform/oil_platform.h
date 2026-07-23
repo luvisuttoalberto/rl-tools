@@ -142,8 +142,6 @@ namespace rl_tools {
                         // Set normalization based on "staying too long" - e.g., 3x the crossing time
                         static constexpr TI MAX_STEPS_FOR_NORMALIZATION = STEPS_TO_CROSS_CELL * 3;
 
-                        static constexpr TI MINIMUM_COVERAGE_STEPS = 100;  // Minimum steps before disaster to count as valid coverage episode
-
                         // Battery and charging parameters
                         // 0.30 with ACCELERATION_PROPORTIONAL_DISCHARGE (frac 0.5) gives a hover/cruise drain
                         // of 0.15/step: ~430 steps of endurance from full battery to a 35% reserve, i.e. ~2

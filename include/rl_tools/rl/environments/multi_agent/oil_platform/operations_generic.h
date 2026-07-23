@@ -1498,7 +1498,7 @@ namespace rl_tools {
 
         utils::assert_exit(device, !math::is_nan(device.math, total_reward), "reward is nan");
 
-        if(!next_state.disaster.active && (static_cast<int>(next_state.step_count) % 10 == 0)){
+        if(!next_state.disaster.active){
             T cov = priority_area_coverage<DEVICE,SPEC>(device, next_state);
             next_state.metrics.total_coverage_ratio =
                     state.metrics.total_coverage_ratio + cov;
@@ -1789,15 +1789,11 @@ namespace rl_tools {
                            static_cast<T>(state.metrics.multi_charging_steps) / static_cast<T>(state.step_count));
             }
 
-            // Only log if disaster never spawned or spawned after minimum coverage time
-            bool had_enough_coverage_time =
-                    state.metrics.coverage_measurement_count >= PARAMS::MINIMUM_COVERAGE_STEPS;
-
-            if (had_enough_coverage_time) {
-                if (state.metrics.coverage_measurement_count > 0) {
-                    T average_coverage = state.metrics.total_coverage_ratio / state.metrics.coverage_measurement_count;
-                    add_scalar(device, device.logger, "coverage/average_priority_area_coverage", average_coverage);
-                }
+            // Unconditional: average coverage over all disaster-free steps of the episode, matching the
+            // eval-runner's eval/average_priority_area_coverage definition so the two are one metric (CODE-3).
+            if (state.metrics.coverage_measurement_count > 0) {
+                T average_coverage = state.metrics.total_coverage_ratio / state.metrics.coverage_measurement_count;
+                add_scalar(device, device.logger, "coverage/average_priority_area_coverage", average_coverage);
                 add_scalar(device, device.logger, "coverage/measurement_count", state.metrics.coverage_measurement_count);
             }
 
