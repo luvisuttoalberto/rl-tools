@@ -38,7 +38,11 @@ namespace rl_tools::rl::zoo::oil_platform_v1::evaluation_runner {
         using T = typename TYPE_POLICY::DEFAULT;
 
         // Same evaluation setup as the zoo training loop (100 episodes, stochastic initial state)
-        constexpr TI N_EPISODES = 100;
+        constexpr TI N_EPISODES = 400;
+        // Trajectories are for the browser UI only; it decompresses the file into a single JS
+        // string, which hard-fails ("Invalid string length") above ~0.5-1 GB decompressed.
+        // Cap the dump at the proven-loadable size; metrics still cover all N_EPISODES.
+        constexpr TI TRAJECTORY_EPISODES = N_EPISODES < 100 ? N_EPISODES : 100;
         constexpr TI STEP_LIMIT = ENVIRONMENT::EPISODE_STEP_LIMIT;
         using EVAL_SPEC = rlt::rl::utils::evaluation::Specification<TYPE_POLICY, TI, ENVIRONMENT, 1, STEP_LIMIT, false>;
         using DATA_SPEC = rlt::rl::utils::evaluation::DataSpecification<EVAL_SPEC>;
@@ -100,11 +104,13 @@ namespace rl_tools::rl::zoo::oil_platform_v1::evaluation_runner {
                 rlt::add_scalar(device, device.logger, "eval/episode_length", result.episode_length[0]);
             }
 
-            std::string episode_json = rlt::rl::loop::steps::save_trajectories::to_string(device, env, data);
-            // to_string returns a one-element JSON array; splice its content into the combined array
-            episodes_json += episode_json.substr(1, episode_json.size() - 2);
-            if(episode_i < N_EPISODES - 1){
-                episodes_json += ",\n";
+            if(episode_i < TRAJECTORY_EPISODES){
+                std::string episode_json = rlt::rl::loop::steps::save_trajectories::to_string(device, env, data);
+                // to_string returns a one-element JSON array; splice its content into the combined array
+                episodes_json += episode_json.substr(1, episode_json.size() - 2);
+                if(episode_i < TRAJECTORY_EPISODES - 1){
+                    episodes_json += ",\n";
+                }
             }
             std::cerr << "Episode " << episode_i << ": return=" << result.returns[0] << " steps=" << result.episode_length[0] << std::endl;
         }
