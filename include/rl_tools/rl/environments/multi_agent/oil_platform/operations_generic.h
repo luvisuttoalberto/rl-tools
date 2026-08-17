@@ -1307,9 +1307,24 @@ namespace rl_tools {
                     } else {
                         if constexpr (PARAMS::BATTERY_ENABLED) {
                             if constexpr (PARAMS::CHARGING_OBJECTIVE_VARIANT == 0) {
+                                // Same urgency as fleet_coverage_capacity above: gated at
+                                // CHARGING_SHAPING_BATTERY_THRESHOLD so the weight a cell is
+                                // credited at matches the weight the capacity is summed with.
                                 T battery_normalized = agent.battery / T(100);
                                 battery_normalized = math::clamp(device.math, battery_normalized, T(0), T(1));
-                                T battery_urgency = linear_weight<DEVICE, PARAMS>(device, battery_normalized);
+                                T battery_urgency;
+                                if constexpr (PARAMS::CHARGING_SHAPING_GATE_ENABLED) {
+                                    const T threshold = PARAMS::CHARGING_SHAPING_BATTERY_THRESHOLD;
+                                    if (battery_normalized >= threshold) {
+                                        battery_urgency = T(0);
+                                    } else {
+                                        const T denom = math::max(device.math, threshold, T(1e-6));
+                                        const T ramp = (threshold - battery_normalized) / denom;
+                                        battery_urgency = math::pow(device.math, ramp, PARAMS::CHARGING_URGENCY_RAMP_POWER);
+                                    }
+                                } else {
+                                    battery_urgency = linear_weight<DEVICE, PARAMS>(device, battery_normalized);
+                                }
                                 battery_urgency = math::clamp(device.math, battery_urgency, T(0), T(1));
                                 coverage_weight_arr[i] = T(1) - battery_urgency;
                             } else {
