@@ -1283,7 +1283,7 @@ namespace rl_tools {
             }
         }
 
-        // Voronoi coverage: compute battery-weighted coverage after processing all agents
+        // Sensor-range coverage: compute the covered fraction after processing all agents
         if constexpr (PARAMS::USE_VORONOI_COVERAGE) {
             if (!disaster_phase) {
                 // Build position, dead, and coverage weight arrays for Voronoi computation
@@ -1301,45 +1301,20 @@ namespace rl_tools {
                     }
                     dead_arr[i] = exclude_from_coverage;
 
-                    // Extract per-agent coverage weight (calculated in loop above)
-                    if (exclude_from_coverage) {
-                        coverage_weight_arr[i] = T(0);
-                    } else {
-                        if constexpr (PARAMS::BATTERY_ENABLED) {
-                            if constexpr (PARAMS::CHARGING_OBJECTIVE_VARIANT == 0) {
-                                // Same urgency as fleet_coverage_capacity above: gated at
-                                // CHARGING_SHAPING_BATTERY_THRESHOLD so the weight a cell is
-                                // credited at matches the weight the capacity is summed with.
-                                T battery_normalized = agent.battery / T(100);
-                                battery_normalized = math::clamp(device.math, battery_normalized, T(0), T(1));
-                                T battery_urgency;
-                                if constexpr (PARAMS::CHARGING_SHAPING_GATE_ENABLED) {
-                                    const T threshold = PARAMS::CHARGING_SHAPING_BATTERY_THRESHOLD;
-                                    if (battery_normalized >= threshold) {
-                                        battery_urgency = T(0);
-                                    } else {
-                                        const T denom = math::max(device.math, threshold, T(1e-6));
-                                        const T ramp = (threshold - battery_normalized) / denom;
-                                        battery_urgency = math::pow(device.math, ramp, PARAMS::CHARGING_URGENCY_RAMP_POWER);
-                                    }
-                                } else {
-                                    battery_urgency = linear_weight<DEVICE, PARAMS>(device, battery_normalized);
-                                }
-                                battery_urgency = math::clamp(device.math, battery_urgency, T(0), T(1));
-                                coverage_weight_arr[i] = T(1) - battery_urgency;
-                            } else {
-                                // Variants 1/2: no battery-based attenuation for task weighting.
-                                coverage_weight_arr[i] = T(1);
-                            }
-                        } else {
-                            coverage_weight_arr[i] = T(1);
-                        }
-                    }
+                    // Coverage is measured unweighted: every agent that is alive and not
+                    // charging credits its assigned cells at 1, so the returned fraction is
+                    // the plain fraction of ROI cells within sensor range of an available
+                    // agent. Battery enters the coverage term exactly once, through
+                    // fleet_coverage_capacity, which sets how much coverage the swarm is
+                    // asked for; weighting the cells as well would charge for a shortfall
+                    // that no action can close.
+                    coverage_weight_arr[i] = exclude_from_coverage ? T(0) : T(1);
                 }
 
-                // Compute Voronoi coverage reward with per-agent battery weighting
-                // Returns coverage fraction in [0,1]; scale by capacity to match penalty normalization
-                // This maintains consistency with Gaussian approach where low-battery agents contribute less
+                // Covered fraction of the ROI, in [0,1]. Scaled by the capacity so that the
+                // penalty below is -beta * fleet_coverage_capacity * (1 - coverage_fraction):
+                // the shortfall in coverage, priced by how much coverage the swarm is
+                // currently able to provide.
                 T coverage_fraction = calculate_voronoi_coverage_reward<DEVICE, PARAMS>(
                     device, pos_arr, dead_arr, coverage_weight_arr
                 );
