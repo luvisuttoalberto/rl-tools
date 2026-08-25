@@ -198,6 +198,13 @@ target_link_libraries(evaluate_oil_platform PRIVATE RLtools::RLtools)
 RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(evaluate_oil_platform)
 target_compile_options(evaluate_oil_platform PRIVATE -O2 -march=native)
 
+# Same runner against the PPO actor, whose checkpoint layout differs from SAC's
+add_executable(evaluate_oil_platform_ppo evaluate_oil_platform.cpp)
+target_link_libraries(evaluate_oil_platform_ppo PRIVATE RLtools::RLtools)
+RL_TOOLS_RL_ZOO_LINK_CLI11_OR_NOT(evaluate_oil_platform_ppo)
+target_compile_definitions(evaluate_oil_platform_ppo PRIVATE RL_TOOLS_USE_MULTI_AGENT_PPO)
+target_compile_options(evaluate_oil_platform_ppo PRIVATE -O2 -march=native)
+
 if(RL_TOOLS_RL_ENVIRONMENTS_ENABLE_MUJOCO)
     # Ant-v4
     # PPO

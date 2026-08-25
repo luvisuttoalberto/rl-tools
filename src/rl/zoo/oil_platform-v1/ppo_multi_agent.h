@@ -13,55 +13,55 @@ namespace rl_tools::rl::zoo::oil_platform_v1::ppo_multi_agent {
         struct LOOP_CORE_PARAMETERS
                 : rlt::rl::algorithms::ppo::loop::core::DefaultParameters<TYPE_POLICY, TI, ENVIRONMENT>
         {
-            // Multi-agent specific network parameters
-            static constexpr TI ACTOR_HIDDEN_DIM = 128;    // Per-agent network size
-            static constexpr TI ACTOR_NUM_LAYERS = 3;     // Deep enough for agent learning
-            static constexpr auto ACTOR_ACTIVATION_FUNCTION = nn::activation_functions::ActivationFunction::FAST_TANH;
-            
-            // Critic processes full state, so keep it reasonably sized
-            static constexpr TI CRITIC_HIDDEN_DIM = 256;   // Full state processing
-            static constexpr TI CRITIC_NUM_LAYERS = 3;     
-            static constexpr auto CRITIC_ACTIVATION_FUNCTION = nn::activation_functions::ActivationFunction::FAST_TANH;
+            // Per-agent actor, centralised critic on the privileged observation. Sizes and
+            // activations match sac.h so the comparison is between the algorithms and not
+            // between two network architectures.
+            static constexpr TI ACTOR_HIDDEN_DIM = 128;
+            static constexpr TI ACTOR_NUM_LAYERS = 3;
+            static constexpr auto ACTOR_ACTIVATION_FUNCTION = nn::activation_functions::ActivationFunction::RELU;
+            static constexpr TI CRITIC_HIDDEN_DIM = 256;
+            static constexpr TI CRITIC_NUM_LAYERS = 3;
+            static constexpr auto CRITIC_ACTIVATION_FUNCTION = nn::activation_functions::ActivationFunction::RELU;
 
-            // PPO-specific parameters for multi-agent
-//            static constexpr T LAMBDA = 0.95;  // GAE lambda
-//            static constexpr T EPSILON_CLIP = 0.2;  // PPO clipping
-//            static constexpr T INITIAL_ACTION_STD = 0.5;  // For continuous actions
-//            static constexpr T LEARNING_RATE_ACTOR = 3e-4;
-//            static constexpr T LEARNING_RATE_CRITIC = 1e-3;
-            
-            // Training parameters (declare first so BATCH_SIZE can be used below)
-            // You can easily adjust N_ENVIRONMENTS: 1 (single env), 16, 32, 64, 128...
-            static constexpr TI N_ENVIRONMENTS = 32;  // Start with moderate parallelism
-            static constexpr TI ON_POLICY_RUNNER_STEPS_PER_ENV = 128;  // Match bottleneck
-            static constexpr TI BATCH_SIZE = 256;  // Fixed batch size like bottleneck (not calculated)
-            static constexpr TI STEP_LIMIT = 100000;
-            
-            // Optimizer parameters
-            struct OPTIMIZER_PARAMETERS: nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<TYPE_POLICY>{
-                static constexpr T ALPHA = 1e-3;
+            static constexpr TI EPISODE_STEP_LIMIT = 1300;
+
+            // Rollout shape is left at PPO's own operating point: an on-policy method needs a
+            // wide rollout, and forcing N_ENVIRONMENTS down to SAC's 4 would handicap the
+            // baseline in the direction of our own conclusion.
+            static constexpr TI N_ENVIRONMENTS = 32;
+            static constexpr TI ON_POLICY_RUNNER_STEPS_PER_ENV = 128;
+            static constexpr TI BATCH_SIZE = 256;
+
+            // STEP_LIMIT counts loop steps; one loop step collects
+            // N_ENVIRONMENTS * ON_POLICY_RUNNER_STEPS_PER_ENV = 4096 environment steps.
+            // 14648 loop steps is 59,998,208 environment steps, matching SAC's 60M
+            // (STEP_LIMIT 15e6 at N_ENVIRONMENTS 4). Recompute this if the rollout shape changes.
+            static constexpr TI ENVIRONMENT_STEP_BUDGET = 60000000;
+            static constexpr TI STEP_LIMIT = ENVIRONMENT_STEP_BUDGET / (N_ENVIRONMENTS * ON_POLICY_RUNNER_STEPS_PER_ENV);
+
+            // The base class names these ACTOR_/CRITIC_OPTIMIZER_PARAMETERS; a plain
+            // OPTIMIZER_PARAMETERS is not read by the approximator config.
+            struct OPTIMIZER_PARAMETERS_COMMON: nn::optimizers::adam::DEFAULT_PARAMETERS_TENSORFLOW<TYPE_POLICY>{
+                static constexpr T ALPHA = 3e-4; // matching SAC's actor and critic learning rate
             };
-            
-            // PPO algorithm parameters
+            using ACTOR_OPTIMIZER_PARAMETERS = OPTIMIZER_PARAMETERS_COMMON;
+            using CRITIC_OPTIMIZER_PARAMETERS = OPTIMIZER_PARAMETERS_COMMON;
+
             struct PPO_PARAMETERS: rl::algorithms::ppo::DefaultParameters<TYPE_POLICY, TI, BATCH_SIZE>{
                 static constexpr T GAMMA = 0.99;
-                static constexpr T ACTION_ENTROPY_COEFFICIENT = 0.01;  // Reduced exploration
-                static constexpr TI N_EPOCHS = 1;  // Match bottleneck for stability
-                static constexpr bool IGNORE_TERMINATION = false;
+                static constexpr T ACTION_ENTROPY_COEFFICIENT = 0.01;
+                static constexpr TI N_EPOCHS = 1;
+                // Bootstrap through death and step-limit transitions, as SAC does.
+                static constexpr bool IGNORE_TERMINATION = true;
             };
+            // LAMBDA, EPSILON_CLIP and the initial action standard deviation stay at the PPO
+            // defaults.
         };
 
-        // Use multi-agent approximator (same as bottleneck)
         using LOOP_CORE_CONFIG = rlt::rl::algorithms::ppo::loop::core::Config<
                 TYPE_POLICY, TI, RNG, ENVIRONMENT, LOOP_CORE_PARAMETERS,
                 rlt::rl::algorithms::ppo::loop::core::ConfigApproximatorsSequentialMultiAgent
         >;
-
-        struct LOOP_EVAL_PARAMETERS
-                : rlt::rl::loop::steps::evaluation::Parameters<TYPE_POLICY,TI,LOOP_CORE_CONFIG>
-        {
-            static constexpr TI EVALUATION_INTERVAL = 200000;
-        };
     };
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END
