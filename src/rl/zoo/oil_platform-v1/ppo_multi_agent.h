@@ -25,17 +25,18 @@ namespace rl_tools::rl::zoo::oil_platform_v1::ppo_multi_agent {
 
             static constexpr TI EPISODE_STEP_LIMIT = 1300;
 
-            // Rollout shape is left at PPO's own operating point: an on-policy method needs a
-            // wide rollout, and forcing N_ENVIRONMENTS down to SAC's 4 would handicap the
-            // baseline in the direction of our own conclusion.
-            static constexpr TI N_ENVIRONMENTS = 32;
-            static constexpr TI ON_POLICY_RUNNER_STEPS_PER_ENV = 128;
-            static constexpr TI BATCH_SIZE = 256;
+            // Rollout shape is the PPO default (64 x 64, batch 512), restated here rather than
+            // inherited so it is visible next to STEP_LIMIT. N_ENVIRONMENTS is deliberately not
+            // forced down to SAC's 4: an on-policy method needs a wide rollout, and narrowing it
+            // would handicap the baseline in the direction of our own conclusion.
+            static constexpr TI N_ENVIRONMENTS = 64;
+            static constexpr TI ON_POLICY_RUNNER_STEPS_PER_ENV = 64;
+            static constexpr TI BATCH_SIZE = 512;
 
             // STEP_LIMIT counts loop steps; one loop step collects
-            // N_ENVIRONMENTS * ON_POLICY_RUNNER_STEPS_PER_ENV = 4096 environment steps.
+            // N_ENVIRONMENTS * ON_POLICY_RUNNER_STEPS_PER_ENV = 4096 environment steps, so
             // 14648 loop steps is 59,998,208 environment steps, matching SAC's 60M
-            // (STEP_LIMIT 15e6 at N_ENVIRONMENTS 4). Recompute this if the rollout shape changes.
+            // (STEP_LIMIT 15e6 at N_ENVIRONMENTS 4). This recomputes with the rollout shape.
             static constexpr TI ENVIRONMENT_STEP_BUDGET = 60000000;
             static constexpr TI STEP_LIMIT = ENVIRONMENT_STEP_BUDGET / (N_ENVIRONMENTS * ON_POLICY_RUNNER_STEPS_PER_ENV);
 
