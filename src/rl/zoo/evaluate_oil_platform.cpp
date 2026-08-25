@@ -25,27 +25,36 @@
 #include <rl_tools/operations/cpu_mux.h>
 #include <rl_tools/nn/optimizers/adam/instance/operations_generic.h>
 #include <rl_tools/nn/operations_cpu_mux.h>
+// The container templates (sequential, multi_agent_wrapper) call malloc/forward/load on
+// whatever they wrap through dependent lookup, and the overloads for the wrapped pieces
+// live in namespace rl_tools, which ADL does not reach from a type nested deeper (e.g.
+// rl_tools::nn::layers::standardize). So every layer and leaf-model header has to be
+// included *before* the two container headers, exactly as zoo.cpp orders them.
 #include <rl_tools/nn/layers/sample_and_squash/operations_generic.h>
+#ifdef RL_TOOLS_USE_MULTI_AGENT_PPO
+#include <rl_tools/nn/layers/standardize/operations_generic.h>
+#endif
 #include <rl_tools/nn_models/mlp/operations_generic.h>
+#ifdef RL_TOOLS_USE_MULTI_AGENT_PPO
+#include <rl_tools/nn_models/mlp_unconditional_stddev/operations_generic.h>
+#endif
 #include <rl_tools/nn_models/sequential/operations_generic.h>
 #include <rl_tools/nn_models/multi_agent_wrapper/operations_generic.h>
 #include <rl_tools/nn/optimizers/adam/operations_generic.h>
 #include <rl_tools/numeric_types/policy.h>
-#ifdef RL_TOOLS_USE_MULTI_AGENT_PPO
-#include <rl_tools/nn/layers/standardize/operations_generic.h>
-#include <rl_tools/nn_models/mlp_unconditional_stddev/operations_generic.h>
-#endif
 
 #include <rl_tools/persist/backends/hdf5/operations_cpu.h>
 #include <rl_tools/nn/layers/sample_and_squash/persist.h>
 #include <rl_tools/nn/layers/dense/persist.h>
-#include <rl_tools/nn_models/mlp/persist.h>
-#include <rl_tools/nn_models/sequential/persist.h>
-#include <rl_tools/nn_models/multi_agent_wrapper/persist.h>
 #ifdef RL_TOOLS_USE_MULTI_AGENT_PPO
 #include <rl_tools/nn/layers/standardize/persist.h>
+#endif
+#include <rl_tools/nn_models/mlp/persist.h>
+#ifdef RL_TOOLS_USE_MULTI_AGENT_PPO
 #include <rl_tools/nn_models/mlp_unconditional_stddev/persist.h>
 #endif
+#include <rl_tools/nn_models/sequential/persist.h>
+#include <rl_tools/nn_models/multi_agent_wrapper/persist.h>
 
 #include "oil_platform-v1/environment.h"
 #ifdef RL_TOOLS_USE_MULTI_AGENT_PPO
@@ -104,7 +113,12 @@ int main(int argc, char** argv){
     rlt::init(device, rng, seed);
 
     ACTOR actor;
-    // unqualified: the per-agent actor's operations live in its own namespace and are found via ADL
+    // The SAC actor's operations live in its own namespace and are found via ADL, so the call
+    // has to stay unqualified; the PPO actor is a multi_agent_wrapper whose operations are in
+    // rl_tools, which ADL does not reach from a type nested below it. These using-declarations
+    // make both sets visible and hide the ::malloc/::free that <cstdlib> would otherwise win with.
+    using rlt::malloc;
+    using rlt::free;
     malloc(device, actor);
     {
         auto hdf5_file = HighFive::File(checkpoint_path, HighFive::File::ReadOnly);

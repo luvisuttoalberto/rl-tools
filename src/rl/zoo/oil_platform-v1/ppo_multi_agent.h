@@ -50,12 +50,14 @@ namespace rl_tools::rl::zoo::oil_platform_v1::ppo_multi_agent {
             struct PPO_PARAMETERS: rl::algorithms::ppo::DefaultParameters<TYPE_POLICY, TI, BATCH_SIZE>{
                 static constexpr T GAMMA = 0.99;
                 static constexpr T ACTION_ENTROPY_COEFFICIENT = 0.01;
-                static constexpr TI N_EPOCHS = 1;
                 // Bootstrap through death and step-limit transitions, as SAC does.
                 static constexpr bool IGNORE_TERMINATION = true;
             };
-            // LAMBDA, EPSILON_CLIP and the initial action standard deviation stay at the PPO
-            // defaults.
+            // N_EPOCHS, LAMBDA, EPSILON_CLIP and the initial action standard deviation stay at
+            // the PPO defaults. N_EPOCHS in particular: the default is 10, and the 1 that was
+            // here came from the bottleneck config. Reusing each rollout once instead of ten
+            // times starves PPO of most of its gradient work per sample, which is the opposite
+            // of a fair sample-efficiency comparison.
         };
 
         using LOOP_CORE_CONFIG = rlt::rl::algorithms::ppo::loop::core::Config<
