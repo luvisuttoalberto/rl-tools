@@ -3,6 +3,7 @@
 #pragma once
 #define RL_TOOLS_RL_COMPONENTS_OFF_POLICY_RUNNER_OPERATIONS_GENERIC_PER_ENV_H
 #include "off_policy_runner.h"
+#include "../../environments/operations_generic.h"
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools::rl::components::off_policy_runner{
     template<typename DEVICE, typename SPEC, typename RNG>
@@ -81,6 +82,7 @@ namespace rl_tools::rl::components::off_policy_runner{
 
         auto action = row(device, runner.buffers.actions, env_i);
 
+        mask_action(device, env, parameters, state, action);
         step(device, env, parameters, state, action, next_state, rng);
 
         T reward_value = reward(device, env, parameters, state, action, next_state, rng);

@@ -54,7 +54,8 @@ using TYPE_POLICY      = rlt::numeric_types::Policy<float, PARAMETER_POLICY>;
 using FACTORY          = rlt::rl::zoo::oil_platform_v1::sac::FACTORY<DEVICE, TYPE_POLICY, TI, RNG>;
 using LOOP_CORE_CONFIG = typename FACTORY::LOOP_CORE_CONFIG;
 using ENVIRONMENT      = typename FACTORY::ENVIRONMENT;
-using ACTOR            = typename LOOP_CORE_CONFIG::NN::ACTOR_TYPE::template CHANGE_CAPABILITY<rlt::nn::capability::Forward<>>;
+using ACTOR_FORWARD    = typename LOOP_CORE_CONFIG::NN::ACTOR_TYPE::template CHANGE_CAPABILITY<rlt::nn::capability::Forward<>>;
+using ACTOR = typename ACTOR_FORWARD::template CHANGE_BATCH_SIZE<TI, 1>;
 
 int main(int argc, char** argv){
     CLI::App app{"evaluate_oil_platform — evaluate a trained SAC checkpoint, emitting zoo-compatible artifacts"};
@@ -68,8 +69,11 @@ int main(int argc, char** argv){
     app.add_option("-s,--seed", seed, "Seed (default: 0)");
     app.add_option("-e,--extrack", extrack_base_path, "Extrack base path (default: experiments)");
     app.add_option("--ee,--extrack-experiment", extrack_experiment, "Extrack experiment timestamp (default: now / $RL_TOOLS_EXTRACK_EXPERIMENT)");
+    TI n_agents = ENVIRONMENT::N_AGENTS;
+    app.add_option("--agents", n_agents, "Number of agents (same checkpoint for every supported size)")->check(CLI::Range(int(ENVIRONMENT::PARAMETERS::MIN_AGENTS), int(ENVIRONMENT::N_AGENTS)));
     CLI11_PARSE(app, argc, argv);
 
+    label += "-n" + std::to_string(n_agents);
     DEVICE device;
     rlt::malloc(device);
     rlt::init(device);
@@ -85,13 +89,14 @@ int main(int argc, char** argv){
         auto group = rlt::get_group(device, hdf5_file, "actor");
         bool ok = rlt::load(device, actor, group);
         if(!ok){
-            std::cerr << "Failed to load actor from: " << checkpoint_path << std::endl;
+            std::cerr << "Incompatible actor checkpoint (requires variable-swarm v2 with the compiled MAX_AGENTS). File: " << checkpoint_path << std::endl;
             return 1;
         }
     }
     std::cerr << "Loaded actor from: " << checkpoint_path << std::endl;
 
     ENVIRONMENT env;
+    env.fixed_n_agents = n_agents;
 
     int result = rlt::rl::zoo::oil_platform_v1::evaluation_runner::run<DEVICE, TYPE_POLICY>(device, env, actor, rng, seed, label, extrack_base_path, extrack_experiment);
 

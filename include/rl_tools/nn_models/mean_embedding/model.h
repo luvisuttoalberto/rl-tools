@@ -4,16 +4,18 @@
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools::nn_models::mean_embedding {
     // Input: [prefix, N_ELEMENTS * ELEMENT_DIM, ignored suffix].
-    // Output: [prefix, mean(shared_encoder(element))]. All elements are present;
-    // this fixed-cardinality module deliberately has no padding/death mask.
+    // Output: [prefix, masked mean(shared_encoder(element))].
+    // Optional final feature in each element is a binary presence mask, not an encoder input.
     template<typename T_ENCODER_CONFIG, auto T_PREFIX_DIM, auto T_ELEMENT_DIM,
-             auto T_N_ELEMENTS, auto T_IGNORED_SUFFIX_DIM = 0>
+             auto T_N_ELEMENTS, auto T_IGNORED_SUFFIX_DIM = 0, bool T_MASKED = false>
     struct Configuration {
         using ENCODER_CONFIG = T_ENCODER_CONFIG;
         using TYPE_POLICY = typename ENCODER_CONFIG::TYPE_POLICY;
         using TI = typename ENCODER_CONFIG::TI;
         static constexpr TI PREFIX_DIM = T_PREFIX_DIM;
         static constexpr TI ELEMENT_DIM = T_ELEMENT_DIM;
+        static constexpr bool MASKED = T_MASKED;
+        static constexpr TI ELEMENT_STRIDE = ELEMENT_DIM + (MASKED ? 1 : 0);
         static constexpr TI N_ELEMENTS = T_N_ELEMENTS;
         static constexpr TI IGNORED_SUFFIX_DIM = T_IGNORED_SUFFIX_DIM;
         static constexpr TI EMBEDDING_DIM = ENCODER_CONFIG::OUTPUT_DIM;
@@ -29,7 +31,7 @@ namespace rl_tools::nn_models::mean_embedding {
         static constexpr TI INPUT_DIM = get_last(INPUT_SHAPE{});
         static constexpr TI OUTPUT_DIM = CONFIG::PREFIX_DIM + CONFIG::EMBEDDING_DIM;
         static constexpr TI INTERNAL_BATCH_SIZE = get<0>(tensor::CumulativeProduct<tensor::PopBack<INPUT_SHAPE>>{});
-        static_assert(INPUT_DIM == CONFIG::PREFIX_DIM + CONFIG::N_ELEMENTS * CONFIG::ELEMENT_DIM + CONFIG::IGNORED_SUFFIX_DIM);
+        static_assert(INPUT_DIM == CONFIG::PREFIX_DIM + CONFIG::N_ELEMENTS * CONFIG::ELEMENT_STRIDE + CONFIG::IGNORED_SUFFIX_DIM);
         template<typename SHAPE>
         using OUTPUT_SHAPE_FACTORY = tensor::Replace<SHAPE, OUTPUT_DIM, length(SHAPE{}) - 1>;
         using OUTPUT_SHAPE = OUTPUT_SHAPE_FACTORY<INPUT_SHAPE>;

@@ -284,7 +284,7 @@ namespace rl_tools {
             const T cy_cell = PARAMS::ROI_CATALOGUE[ri].y;
 
             /* covered if ANY live drone has the cell centre within sensor range */
-            for (TI i = 0; i < N; ++i) {
+            for (TI i = 0; i < s_next.n_agents; ++i) {
                 const auto &d = s_next.drone_states[i];
                 if (d.dead) continue;
                 if constexpr (PARAMS::EXCLUDE_CHARGING_FROM_COVERAGE) {
@@ -317,8 +317,8 @@ namespace rl_tools {
     template<typename DEVICE, typename SPEC>
     RL_TOOLS_FUNCTION_PLACEMENT static void init(
             DEVICE &device,
-            const rl::environments::multi_agent::OilPlatform<SPEC> &env
-    ) {}
+            rl::environments::multi_agent::OilPlatform<SPEC> &env
+    ) { env.fixed_n_agents = 0; }
 
     template<typename DEVICE, typename SPEC, typename RNG>
     RL_TOOLS_FUNCTION_PLACEMENT static void sample_initial_parameters(
@@ -410,9 +410,20 @@ namespace rl_tools {
                                                          state.charging_station_position[1],
                                                          rng);
 
+        state.n_agents = PARAMS::N_AGENTS;
+        if constexpr (PARAMS::RANDOMIZE_SWARM_SIZE) {
+            utils::assert_exit(device, env.fixed_n_agents == 0 || (env.fixed_n_agents >= PARAMS::MIN_AGENTS && env.fixed_n_agents <= PARAMS::N_AGENTS), "Invalid swarm size");
+            state.n_agents = env.fixed_n_agents ? env.fixed_n_agents : random::uniform_int_distribution(device.random, TI(PARAMS::MIN_AGENTS), TI(PARAMS::N_AGENTS), rng);
+        }
+
         // Initialize all drone states
         for (TI agent_i = 0; agent_i < PARAMS::N_AGENTS; ++agent_i) {
             auto &agent_state = state.drone_states[agent_i];
+            if (agent_i >= state.n_agents) {
+                agent_state = {};
+                agent_state.dead = true; // inert padding, distinguished by presence masks
+                continue;
+            }
             // Spawn drones anywhere in the environment (not just center platform)
             // agent_state.position[0] = random::uniform_real_distribution(device.random, T(PARAMS::GRID_SIZE_X)/2 - 2, T(PARAMS::GRID_SIZE_X)/2 + 2, rng);
             // agent_state.position[1] = random::uniform_real_distribution(device.random, T(PARAMS::GRID_SIZE_Y)/2 - 2, T(PARAMS::GRID_SIZE_Y)/2 + 2, rng);
@@ -504,14 +515,25 @@ namespace rl_tools {
         state.charging_station_position[0] = PARAMS::CHARGING_STATION_POSITION_X;
         state.charging_station_position[1] = PARAMS::CHARGING_STATION_POSITION_Y;
 
+        state.n_agents = PARAMS::N_AGENTS;
+        if constexpr (PARAMS::RANDOMIZE_SWARM_SIZE) {
+            utils::assert_exit(device, env.fixed_n_agents == 0 || (env.fixed_n_agents >= PARAMS::MIN_AGENTS && env.fixed_n_agents <= PARAMS::N_AGENTS), "Invalid swarm size");
+            state.n_agents = env.fixed_n_agents ? env.fixed_n_agents : PARAMS::N_AGENTS;
+        }
+
         // Initialize all drone states
         // Distribute drones evenly across the environment in a grid pattern
-        TI agents_per_row = static_cast<TI>(math::sqrt(device.math, T(SPEC::PARAMETERS::N_AGENTS))) + 1;
+        TI agents_per_row = static_cast<TI>(math::sqrt(device.math, T(state.n_agents))) + 1;
         T spacing_x = T(SPEC::PARAMETERS::GRID_SIZE_X) / T(agents_per_row + 1);
         T spacing_y = T(SPEC::PARAMETERS::GRID_SIZE_Y) / T(agents_per_row + 1);
         
         for (TI agent_i = 0; agent_i < SPEC::PARAMETERS::N_AGENTS; ++agent_i) {
             auto &agent_state = state.drone_states[agent_i];
+            if (agent_i >= state.n_agents) {
+                agent_state = {};
+                agent_state.dead = true; // inert padding, distinguished by presence masks
+                continue;
+            }
             // Distribute drones in a grid pattern across the environment
             TI row = agent_i / agents_per_row;
             TI col = agent_i % agents_per_row;
@@ -598,6 +620,16 @@ namespace rl_tools {
         initial_state(device, env, parameters, state, rng);
     }
 
+    template<typename DEVICE, typename SPEC, typename ACTION_SPEC>
+    RL_TOOLS_FUNCTION_PLACEMENT void mask_action(DEVICE&, const rl::environments::multi_agent::OilPlatform<SPEC>&,
+            const typename SPEC::PARAMETERS&, const typename SPEC::STATE& state, Matrix<ACTION_SPEC>& action) {
+        if constexpr (SPEC::PARAMETERS::RANDOMIZE_SWARM_SIZE) {
+            for(typename SPEC::TI i = 0; i < SPEC::PARAMETERS::N_AGENTS; ++i)
+                if(i >= state.n_agents || state.drone_states[i].dead)
+                    for(typename SPEC::TI k = 0; k < 2; ++k) set(action, 0, i * 2 + k, 0);
+        }
+    }
+
     template<typename DEVICE, typename SPEC, typename ACTION_SPEC, typename RNG>
     RL_TOOLS_FUNCTION_PLACEMENT static typename SPEC::T step(
             DEVICE &device,
@@ -617,6 +649,7 @@ namespace rl_tools {
         utils::assert_exit(device, !is_nan(device, action), "Action is nan");
 
 
+        next_state = state; // retain count and canonical inactive slots
         next_state.metrics = state.metrics;
         next_state.charging_station_position[0] = state.charging_station_position[0];
         next_state.charging_station_position[1] = state.charging_station_position[1];
@@ -752,7 +785,7 @@ namespace rl_tools {
         }
 
         // (2) Per-drone update for position and velocity, velocity control
-        for (TI agent_i = 0; agent_i < N_AGENTS; ++agent_i) {
+        for (TI agent_i = 0; agent_i < state.n_agents; ++agent_i) {
 
             const auto &agent_state = state.drone_states[agent_i];
             auto &agent_next_state = next_state.drone_states[agent_i];
@@ -814,7 +847,7 @@ namespace rl_tools {
         }
 
         // (3) Per-drone update for battery and charging
-        for (TI agent_i = 0; agent_i < N_AGENTS; ++agent_i) {
+        for (TI agent_i = 0; agent_i < state.n_agents; ++agent_i) {
             auto &agent_next_state = next_state.drone_states[agent_i];
             const auto &agent_state = state.drone_states[agent_i];
 
@@ -952,10 +985,10 @@ namespace rl_tools {
         // and are picked up by the death metrics below.
         if constexpr (PARAMS::DRONE_COLLISION_ENABLED) {
             constexpr T COLLISION_RADIUS_SQ = PARAMS::DRONE_COLLISION_RADIUS * PARAMS::DRONE_COLLISION_RADIUS;
-            for (TI i = 0; i < N_AGENTS; ++i) {
+            for (TI i = 0; i < state.n_agents; ++i) {
                 auto &drone_i = next_state.drone_states[i];
                 if (drone_i.dead) continue;
-                for (TI j = i + 1; j < N_AGENTS; ++j) {
+                for (TI j = i + 1; j < state.n_agents; ++j) {
                     auto &drone_j = next_state.drone_states[j];
                     if (drone_j.dead) continue;
 
@@ -980,7 +1013,7 @@ namespace rl_tools {
 
         if (next_state.disaster.active) {
             bool any_detection = false;
-            for (TI agent_i = 0; agent_i < N_AGENTS; ++agent_i) {
+            for (TI agent_i = 0; agent_i < state.n_agents; ++agent_i) {
                 auto &agent_next_state = next_state.drone_states[agent_i];
 
                 if (agent_next_state.dead || agent_next_state.is_charging) {
@@ -1026,7 +1059,7 @@ namespace rl_tools {
             next_state.last_detected_disaster_position[0] = 0.0;
             next_state.last_detected_disaster_position[1] = 0.0;
 
-            for (TI i = 0; i < N_AGENTS; ++i) {
+            for (TI i = 0; i < state.n_agents; ++i) {
                 next_state.drone_states[i].is_detecting = false;
             }
         }
@@ -1066,7 +1099,7 @@ namespace rl_tools {
             TI inappropriate_charging_sessions = 0;
             TI death_count = 0;
 
-            for (TI agent_i = 0; agent_i < N_AGENTS; ++agent_i) {
+            for (TI agent_i = 0; agent_i < state.n_agents; ++agent_i) {
                 const auto &agent_state = state.drone_states[agent_i];
                 const auto &agent_next_state = next_state.drone_states[agent_i];
 
@@ -1135,7 +1168,7 @@ namespace rl_tools {
         T fleet_charging_need = 0;        // Sum of charging weights: battery_urgency per agent
         T charging_potential_shaping = 0; // Potential-based charging shaping reward (flag-gated; 0 when disabled)
 
-        for (TI i = 0; i < N_AGENTS; ++i) {
+        for (TI i = 0; i < state.n_agents; ++i) {
             const auto& agent_next_state = next_state.drone_states[i];
             if (agent_next_state.dead) {
                 continue;
@@ -1295,7 +1328,7 @@ namespace rl_tools {
                     const auto &agent = next_state.drone_states[i];
                     pos_arr[i][0] = agent.position[0];
                     pos_arr[i][1] = agent.position[1];
-                    bool exclude_from_coverage = agent.dead;
+                    bool exclude_from_coverage = i >= state.n_agents || agent.dead;
                     if constexpr (PARAMS::EXCLUDE_CHARGING_FROM_COVERAGE) {
                         exclude_from_coverage = exclude_from_coverage || agent.is_charging;
                     }
@@ -1344,7 +1377,7 @@ namespace rl_tools {
                 charging_penalty = -PARAMS::GAUSS_BETA_CHARGING * (fleet_charging_need - fleet_charging_value);
             } else {
                 // Non-spatial variants: battery-state shaping only.
-                for (TI i = 0; i < N_AGENTS; ++i) {
+                for (TI i = 0; i < state.n_agents; ++i) {
                     const auto& agent_next_state = next_state.drone_states[i];
                     if (agent_next_state.dead) {
                         continue;
@@ -1382,7 +1415,7 @@ namespace rl_tools {
             // Build position array for alive, non-charging agents
             typename PARAMS::T pos_arr[N_AGENTS][2];
             TI active_agent_count = 0;
-            for (TI i = 0; i < N_AGENTS; ++i) {
+            for (TI i = 0; i < state.n_agents; ++i) {
                 const auto& agent = next_state.drone_states[i];
                 // Only apply repulsion to active agents (not dead, not charging)
                 if (!agent.dead && !agent.is_charging) {
@@ -1438,7 +1471,7 @@ namespace rl_tools {
         T death_penalty = T(0);
         TI dead_count = 0;
         if constexpr (PARAMS::BATTERY_ENABLED) {
-            for (TI i = 0; i < N_AGENTS; ++i) {
+            for (TI i = 0; i < state.n_agents; ++i) {
                 if (!state.drone_states[i].dead && next_state.drone_states[i].dead) {
                     death_penalty += PARAMS::DEATH_PENALTY;  // One-time penalty (already negative)
                 }
@@ -1455,7 +1488,7 @@ namespace rl_tools {
 
         // Movement cost as negative penalty
         T movement_penalty = T(0);
-        for (TI agent_i = 0; agent_i < N_AGENTS; ++agent_i) {
+        for (TI agent_i = 0; agent_i < state.n_agents; ++agent_i) {
             const auto& agent_next_state = next_state.drone_states[agent_i];
             if (!agent_next_state.dead) {
                 T speed = magnitude(device, agent_next_state.velocity[0], agent_next_state.velocity[1]);
@@ -1465,7 +1498,7 @@ namespace rl_tools {
 
         // Count agents currently charging (shared by the occupancy penalty and the occupancy metric).
         TI charging_count = 0;
-        for (TI i = 0; i < N_AGENTS; ++i) {
+        for (TI i = 0; i < state.n_agents; ++i) {
             if (!next_state.drone_states[i].dead && next_state.drone_states[i].is_charging) {
                 ++charging_count;
             }
@@ -1481,6 +1514,22 @@ namespace rl_tools {
             if (charging_count > 1) {
                 charger_occupancy_penalty = -PARAMS::CHARGER_OCCUPANCY_BETA * T(charging_count - 1);
             }
+        }
+
+        // Preserve the three-agent reward scale across sampled fleet sizes.
+        // Normalize by the initial/present count, never the surviving count.
+        if constexpr (PARAMS::NORMALIZE_SWARM_REWARD) {
+            const T scale = PARAMS::REWARD_REFERENCE_AGENTS / T(state.n_agents);
+            coverage_penalty *= scale;
+            charging_penalty *= scale;
+            battery_risk_penalty *= scale;
+            charging_event_penalty *= scale;
+            death_penalty *= scale;
+            ongoing_death_penalty *= scale;
+            movement_penalty *= scale;
+            charging_potential_shaping *= scale;
+            repulsion_penalty *= PARAMS::REWARD_REFERENCE_AGENTS * (PARAMS::REWARD_REFERENCE_AGENTS - T(1)) / (T(state.n_agents) * T(state.n_agents - 1));
+            charger_occupancy_penalty *= (PARAMS::REWARD_REFERENCE_AGENTS - T(1)) / T(state.n_agents - 1);
         }
 
 //        T total_reward = coverage_penalty + charging_penalty + temporal_penalty + death_penalty + ongoing_death_penalty + movement_penalty + repulsion_penalty;
@@ -1539,6 +1588,14 @@ namespace rl_tools {
         for (TI agent_i = 0; agent_i < PARAMS::N_AGENTS; ++agent_i) {
             const auto &agent_state = state.drone_states[agent_i];
             TI offset = agent_i * PER_AGENT_DIM;
+            if (agent_i >= state.n_agents) {
+                for (TI k = 0; k < PER_AGENT_DIM; ++k) set(observation, 0, offset + k, T(0));
+                continue;
+            }
+            if constexpr (PARAMS::RANDOMIZE_SWARM_SIZE) {
+                set(observation, 0, offset + OBS::BASE_PER_AGENT_DIM + OBS::RELATIVE_EXTRA_DIM, T(1));
+                set(observation, 0, offset + OBS::BASE_PER_AGENT_DIM + OBS::RELATIVE_EXTRA_DIM + 1, T(state.n_agents) / T(PARAMS::N_AGENTS));
+            }
 
             // Own state: 8 dims
             set(observation, 0, offset + 0, 2 * (agent_state.position[0] / PARAMS::GRID_SIZE_X) - 1);
@@ -1575,12 +1632,18 @@ namespace rl_tools {
             // Other agents: PER_OTHER_AGENT_DIM dims each, in index order skipping self
             // Layout per other agent: rel_pos(2), vel(2), battery(1), dead(1), is_charging(1), is_detecting(1)
             {
-                TI other_offset = offset + OBS::BASE_PER_AGENT_DIM + OBS::RELATIVE_EXTRA_DIM;
+                TI other_offset = offset + OBS::PREFIX_DIM;
                 TI slot = 0;
                 for (TI agent_j = 0; agent_j < PARAMS::N_AGENTS; ++agent_j) {
                     if (agent_j == agent_i) { continue; }
                     const auto &other = state.drone_states[agent_j];
                     TI base = other_offset + slot * OBS::PER_OTHER_AGENT_DIM;
+                    if (agent_j >= state.n_agents) {
+                        for (TI k = 0; k < OBS::PER_OTHER_AGENT_DIM; ++k) set(observation, 0, base + k, T(0));
+                        ++slot;
+                        continue;
+                    }
+                    if constexpr (PARAMS::RANDOMIZE_SWARM_SIZE) set(observation, 0, base + 8, T(1));
                     set(observation, 0, base + 0, (other.position[0] - agent_state.position[0]) / T(PARAMS::GRID_SIZE_X));
                     set(observation, 0, base + 1, (other.position[1] - agent_state.position[1]) / T(PARAMS::GRID_SIZE_Y));
                     if constexpr (PARAMS::OTHER_AGENTS_OBSERVE_RELATIVE_VELOCITY) {
@@ -1601,7 +1664,7 @@ namespace rl_tools {
             // One-hot agent index: breaks weight-sharing symmetry so agents in identical
             // states can learn differentiated actions (e.g. diverge after disaster)
             {
-                TI id_offset = offset + OBS::BASE_PER_AGENT_DIM + OBS::RELATIVE_EXTRA_DIM + OBS::OTHER_AGENTS_DIM;
+                TI id_offset = offset + OBS::PREFIX_DIM + OBS::OTHER_AGENTS_DIM;
                 for (TI k = 0; k < PARAMS::N_AGENTS; ++k) {
                     set(observation, 0, id_offset + k, k == agent_i ? T(1) : T(-1));
                 }
@@ -1653,6 +1716,11 @@ namespace rl_tools {
         for (TI agent_i = 0; agent_i < PARAMS::N_AGENTS; ++agent_i) {
             const auto &agent_state = state.drone_states[agent_i];
             TI base_offset = agent_i * PER_AGENT_DIM;
+            if (agent_i >= state.n_agents) {
+                for (TI k = 0; k < PER_AGENT_DIM; ++k) set(observation, 0, base_offset + k, T(0));
+                continue;
+            }
+            if constexpr (PARAMS::RANDOMIZE_SWARM_SIZE) set(observation, 0, base_offset + 8, T(1));
 
             set(observation, 0, base_offset + 0, 2 * (agent_state.position[0] / PARAMS::GRID_SIZE_X) - 1);  // pos_x
             set(observation, 0, base_offset + 1, 2 * (agent_state.position[1] / PARAMS::GRID_SIZE_Y) - 1);  // pos_y
@@ -1711,7 +1779,7 @@ namespace rl_tools {
         // Check if all drones are dead
         if (PARAMS::BATTERY_ENABLED){
             bool any_alive = false;
-            for (TI agent_i = 0; agent_i < PARAMS::N_AGENTS; ++agent_i) {
+            for (TI agent_i = 0; agent_i < state.n_agents; ++agent_i) {
                 if (!state.drone_states[agent_i].dead) {
                     any_alive = true;
                     break;
@@ -1755,6 +1823,7 @@ namespace rl_tools {
         // LOG METRICS AT EPISODE END (terminated or truncated)
         if (log_episode_end) {
 
+            add_scalar(device, device.logger, "agents/swarm_size", state.n_agents);
             // Basic episode metrics
             add_scalar(device, device.logger, "episode/total_steps", state.step_count);
             add_scalar(device, device.logger, "episode/step_limit", state.episode_step_limit);
@@ -1821,7 +1890,7 @@ namespace rl_tools {
             T max_battery = 0;
             TI alive_count = 0;
 
-            for (TI agent_i = 0; agent_i < PARAMS::N_AGENTS; ++agent_i) {
+            for (TI agent_i = 0; agent_i < state.n_agents; ++agent_i) {
                 if (!state.drone_states[agent_i].dead) {
                     ++alive_count;
                     T battery = state.drone_states[agent_i].battery;
@@ -1848,7 +1917,7 @@ namespace rl_tools {
             add_scalar(device, device.logger, "agents/alive_at_end", alive_count);
 
             // Survival rate
-            T survival_rate = T(alive_count) / T(PARAMS::N_AGENTS);
+            T survival_rate = T(alive_count) / T(state.n_agents);
             add_scalar(device, device.logger, "agents/survival_rate", survival_rate);
 
             // Death-only termination flag: 1 if all agents dead, 0 if episode ended by step limit.

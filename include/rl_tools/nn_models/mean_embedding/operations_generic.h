@@ -71,6 +71,18 @@ namespace rl_tools::nn_models::mean_embedding {
         return view(device, model.output, matrix::ViewSpec<SPEC::INTERNAL_BATCH_SIZE, SPEC::OUTPUT_DIM>{});
     }
 
+    template<typename SPEC, typename INPUT>
+    bool present(const INPUT& input, typename SPEC::TI row, typename SPEC::TI element) {
+        if constexpr (SPEC::MASKED) return get(input, row, SPEC::PREFIX_DIM + element * SPEC::ELEMENT_STRIDE + SPEC::ELEMENT_DIM) > 0;
+        else return true;
+    }
+    template<typename SPEC, typename INPUT>
+    auto count(const INPUT& input, typename SPEC::TI row) {
+        typename SPEC::TI n = 0;
+        for(typename SPEC::TI j = 0; j < SPEC::N_ELEMENTS; ++j) n += present<SPEC>(input, row, j);
+        return n;
+    }
+
     template<typename SPEC, typename INPUT, typename PACKED>
     void pack(const INPUT& input, PACKED& packed) {
         using TI = typename SPEC::TI;
@@ -78,7 +90,7 @@ namespace rl_tools::nn_models::mean_embedding {
         for(TI row = 0; row < INPUT::ROWS; ++row)
             for(TI j = 0; j < SPEC::N_ELEMENTS; ++j)
                 for(TI k = 0; k < SPEC::ELEMENT_DIM; ++k)
-                    set(packed, row * SPEC::N_ELEMENTS + j, k, get(input, row, SPEC::PREFIX_DIM + j * SPEC::ELEMENT_DIM + k));
+                    set(packed, row * SPEC::N_ELEMENTS + j, k, present<SPEC>(input, row, j) ? get(input, row, SPEC::PREFIX_DIM + j * SPEC::ELEMENT_STRIDE + k) : 0);
     }
     template<typename SPEC, typename INPUT, typename EMBEDDED, typename OUTPUT>
     void pool(const INPUT& input, const EMBEDDED& embedded, OUTPUT& output) {
@@ -86,11 +98,12 @@ namespace rl_tools::nn_models::mean_embedding {
         using T = typename SPEC::TYPE_POLICY::template GET<numeric_types::categories::Accumulator>;
         static_assert(OUTPUT::ROWS == INPUT::ROWS && OUTPUT::COLS == SPEC::OUTPUT_DIM);
         for(TI row = 0; row < INPUT::ROWS; ++row) {
+            const TI n = count<SPEC>(input, row);
             for(TI k = 0; k < SPEC::PREFIX_DIM; ++k) set(output, row, k, get(input, row, k));
             for(TI k = 0; k < SPEC::EMBEDDING_DIM; ++k) {
                 T sum = 0;
-                for(TI j = 0; j < SPEC::N_ELEMENTS; ++j) sum += get(embedded, row * SPEC::N_ELEMENTS + j, k);
-                set(output, row, SPEC::PREFIX_DIM + k, sum / T(SPEC::N_ELEMENTS));
+                for(TI j = 0; j < SPEC::N_ELEMENTS; ++j) if(present<SPEC>(input, row, j)) sum += get(embedded, row * SPEC::N_ELEMENTS + j, k);
+                set(output, row, SPEC::PREFIX_DIM + k, n ? sum / T(n) : T(0));
             }
         }
     }
@@ -129,10 +142,12 @@ namespace rl_tools::nn_models::mean_embedding {
         auto dout = matrix_view(device, d_output);
         static_assert(decltype(in)::ROWS == SPEC::INTERNAL_BATCH_SIZE);
         pack<SPEC>(in, buffer.packed);
-        for(TI row = 0; row < SPEC::INTERNAL_BATCH_SIZE; ++row)
+        for(TI row = 0; row < SPEC::INTERNAL_BATCH_SIZE; ++row) {
+            const TI n = count<SPEC>(in, row);
             for(TI j = 0; j < SPEC::N_ELEMENTS; ++j)
                 for(TI k = 0; k < SPEC::EMBEDDING_DIM; ++k)
-                    set(buffer.d_embedded, row * SPEC::N_ELEMENTS + j, k, get(dout, row, SPEC::PREFIX_DIM + k) / T(SPEC::N_ELEMENTS));
+                    set(buffer.d_embedded, row * SPEC::N_ELEMENTS + j, k, present<SPEC>(in, row, j) ? get(dout, row, SPEC::PREFIX_DIM + k) / T(n) : T(0));
+        }
         rl_tools::backward_full(device, model.encoder, buffer.packed, buffer.d_embedded, buffer.d_packed, buffer.encoder, mode);
     }
     template<typename DEVICE, typename SPEC, typename INPUT, typename D_OUTPUT, typename D_INPUT, typename BS, bool DA, typename MODE = mode::Default<>>
@@ -141,12 +156,13 @@ namespace rl_tools::nn_models::mean_embedding {
         using TI = typename SPEC::TI;
         auto dout = matrix_view(device, d_output);
         auto din = matrix_view(device, d_input);
+        auto in = matrix_view(device, input);
         set_all(device, din, 0);
         for(TI row = 0; row < SPEC::INTERNAL_BATCH_SIZE; ++row) {
             for(TI k = 0; k < SPEC::PREFIX_DIM; ++k) set(din, row, k, get(dout, row, k));
             for(TI j = 0; j < SPEC::N_ELEMENTS; ++j)
                 for(TI k = 0; k < SPEC::ELEMENT_DIM; ++k)
-                    set(din, row, SPEC::PREFIX_DIM + j * SPEC::ELEMENT_DIM + k, get(buffer.d_packed, row * SPEC::N_ELEMENTS + j, k));
+                    set(din, row, SPEC::PREFIX_DIM + j * SPEC::ELEMENT_STRIDE + k, present<SPEC>(in, row, j) ? get(buffer.d_packed, row * SPEC::N_ELEMENTS + j, k) : 0);
         }
     }
 }

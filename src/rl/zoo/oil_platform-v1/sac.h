@@ -9,7 +9,7 @@ namespace rl_tools::rl::zoo::oil_platform_v1::sac {
     template <typename DEVICE, typename TYPE_POLICY, typename TI, typename RNG, bool DYNAMIC_ALLOCATION = true>
     struct FACTORY {
         using T = typename TYPE_POLICY::DEFAULT;
-        using ENVIRONMENT = typename ENVIRONMENT_FACTORY<DEVICE, TYPE_POLICY, TI, true>::ENVIRONMENT;
+        using ENVIRONMENT = typename ENVIRONMENT_FACTORY<DEVICE, TYPE_POLICY, TI, true, true>::ENVIRONMENT;
 
         struct LOOP_CORE_PARAMETERS: rlt::rl::algorithms::sac::loop::core::DefaultParameters<TYPE_POLICY, TI, ENVIRONMENT>{
             struct SAC_PARAMETERS: rlt::rl::algorithms::sac::DefaultParameters<TYPE_POLICY, TI, ENVIRONMENT::ACTION_DIM>{
@@ -21,7 +21,7 @@ namespace rl_tools::rl::zoo::oil_platform_v1::sac {
                 static constexpr TI CRITIC_TARGET_UPDATE_INTERVAL = 1 * TRAINING_INTERVAL;
                 static constexpr T GAMMA = 0.99;
                 static constexpr bool IGNORE_TERMINATION = true;
-                static constexpr T TARGET_ENTROPY = -static_cast<T>(6);
+                static constexpr T TARGET_ENTROPY = -static_cast<T>(ENVIRONMENT::ACTION_DIM);
                 static constexpr TI SEQUENCE_LENGTH = 1;
                 static constexpr bool ENTROPY_BONUS_NEXT_STEP = false;
             };

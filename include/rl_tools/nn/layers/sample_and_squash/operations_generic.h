@@ -47,12 +47,14 @@ namespace rl_tools{
     template<typename DEVICE, typename SPEC>
     RL_TOOLS_FUNCTION_PLACEMENT void malloc(DEVICE& device, nn::layers::sample_and_squash::Buffer<SPEC>& buffer) {
         malloc(device, buffer.noise);
+        if constexpr(SPEC::SPEC::MASK_ACTIONS) { malloc(device, buffer.action_mask); set_all(device, buffer.action_mask, 1); }
         malloc(device, buffer.d_log_alpha);
         malloc(device, buffer.log_probabilities);
     }
     template<typename DEVICE, typename SPEC>
     RL_TOOLS_FUNCTION_PLACEMENT void free(DEVICE& device, nn::layers::sample_and_squash::Buffer<SPEC>& buffer) {
         free(device, buffer.noise);
+        if constexpr(SPEC::SPEC::MASK_ACTIONS) free(device, buffer.action_mask);
         free(device, buffer.d_log_alpha);
         free(device, buffer.log_probabilities);
     }
@@ -66,7 +68,9 @@ namespace rl_tools{
     RL_TOOLS_FUNCTION_PLACEMENT void free(DEVICE& device, nn::layers::sample_and_squash::State& state) { } // no-op
     template <typename SOURCE_DEVICE, typename TARGET_DEVICE, typename SOURCE_SPEC, typename TARGET_SPEC>
     RL_TOOLS_FUNCTION_PLACEMENT void copy(SOURCE_DEVICE& source_device, TARGET_DEVICE& target_device, nn::layers::sample_and_squash::Buffer<SOURCE_SPEC>& source, nn::layers::sample_and_squash::Buffer<TARGET_SPEC>& target){
+        static_assert(SOURCE_SPEC::SPEC::MASK_ACTIONS == TARGET_SPEC::SPEC::MASK_ACTIONS);
         copy(source_device, target_device, source.noise, target.noise);
+        if constexpr(SOURCE_SPEC::SPEC::MASK_ACTIONS) copy(source_device, target_device, source.action_mask, target.action_mask);
         copy(source_device, target_device, source.log_probabilities, target.log_probabilities);
         copy(source_device, target_device, source.d_log_alpha, target.d_log_alpha);
     }
@@ -152,6 +156,9 @@ namespace rl_tools{
         using PARAMETERS = typename SPEC::PARAMETERS;
         T log_prob = 0;
         for(TI col_i = 0; col_i < SPEC::DIM; col_i++){
+            if constexpr(SPEC::MASK_ACTIONS) {
+                if(get(buffer.action_mask, row_i, col_i) == 0) { set(output, row_i, col_i, 0); continue; }
+            }
             T mean = get(input, row_i, col_i);
             T log_std = get(input, row_i, SPEC::DIM + col_i);
             T log_std_clipped = math::clamp(device.math, log_std, (T)PARAMETERS::LOG_STD_LOWER_BOUND, (T)PARAMETERS::LOG_STD_UPPER_BOUND);
@@ -216,6 +223,14 @@ namespace rl_tools{
         using PARAMETERS = typename SPEC::PARAMETERS;
         T log_prob = 0;
         for(TI col_i = 0; col_i < SPEC::DIM; col_i++){
+            if constexpr(SPEC::MASK_ACTIONS) {
+                if(get(buffer.action_mask, row_i, col_i) == 0) {
+                    set(layer.output, row_i, col_i, 0);
+                    set(layer.noise, row_i, col_i, 0);
+                    set(layer.pre_squashing, row_i, col_i, 0);
+                    continue;
+                }
+            }
             T mean = get(input, row_i, col_i);
             T log_std = get(input, row_i, SPEC::DIM + col_i);
             T log_std_clipped = math::clamp(device.math, log_std, (T)PARAMETERS::LOG_STD_LOWER_BOUND, (T)PARAMETERS::LOG_STD_UPPER_BOUND);
@@ -318,7 +333,16 @@ namespace rl_tools{
             alpha = 0;
         }
         T entropy = 0;
+        TI active_dimensions = 0;
         for(TI action_i = 0; action_i < ACTION_DIM; action_i++){
+            if constexpr(SPEC::MASK_ACTIONS) {
+                if(get(buffer.action_mask, batch_i, action_i) == 0) {
+                    set(d_input, batch_i, action_i, 0);
+                    set(d_input, batch_i, action_i + ACTION_DIM, 0);
+                    continue;
+                }
+            }
+            ++active_dimensions;
             T action = get(layer.output, batch_i, action_i); // tanh(action_sample)
             T d_mu = 0;
             T d_std = 0;
@@ -351,7 +375,7 @@ namespace rl_tools{
             T action_log_prob = random::normal_distribution::log_prob(device.random, mu, log_std_clamped, action_sample) - math::log(typename DEVICE::SPEC::MATH{}, one_minus_action_square_plus_eps);
             entropy += -action_log_prob;
         }
-        T d_alpha = entropy - SPEC::PARAMETERS::TARGET_ENTROPY;
+        T d_alpha = entropy - SPEC::PARAMETERS::TARGET_ENTROPY * T(active_dimensions) / T(ACTION_DIM);
         T d_log_alpha = alpha*d_alpha; // d_log_alpha
         set(buffer.d_log_alpha, 0, batch_i, d_log_alpha);
     }
@@ -368,6 +392,7 @@ namespace rl_tools{
             // logging
             T entropy = 0;
             for(TI action_i = 0; action_i < SPEC::DIM; action_i++){
+                if constexpr(SPEC::MASK_ACTIONS) if(get(buffer.action_mask, 0, action_i) == 0) continue;
                 T action = get(layer.output, 0, action_i);
                 T mu = get(input, 0, action_i);
                 T log_std_pre_clamp = get(input, 0, action_i + SPEC::DIM);

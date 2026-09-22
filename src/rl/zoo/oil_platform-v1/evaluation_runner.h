@@ -95,6 +95,7 @@ namespace rl_tools::rl::zoo::oil_platform_v1::evaluation_runner {
             // read from the accumulated metrics in the final state and logged unconditionally.
             {
                 auto& final_state = get_ref(device, data.states, 0, STEP_LIMIT - 1);
+                rlt::add_scalar(device, device.logger, "eval/swarm_size", final_state.n_agents);
                 if(final_state.metrics.coverage_measurement_count > 0){
                     T average_coverage = final_state.metrics.total_coverage_ratio / final_state.metrics.coverage_measurement_count;
                     rlt::add_scalar(device, device.logger, "eval/average_priority_area_coverage", average_coverage);

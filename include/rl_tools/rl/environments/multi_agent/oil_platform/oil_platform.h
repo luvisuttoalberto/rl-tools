@@ -41,7 +41,12 @@ namespace rl_tools {
 
 
                         // Number of drones
-                        static constexpr TI N_AGENTS = 3;
+                        static constexpr TI MAX_AGENTS = 3;
+                        static constexpr TI N_AGENTS = MAX_AGENTS; // storage capacity (legacy alias)
+                        static constexpr TI MIN_AGENTS = 2;
+                        static constexpr bool RANDOMIZE_SWARM_SIZE = false;
+                        static constexpr bool NORMALIZE_SWARM_REWARD = false;
+                        static constexpr T REWARD_REFERENCE_AGENTS = T(3);
 
                         // Sensing & motion
                         static constexpr T SENSOR_RANGE = 50.0;
@@ -392,11 +397,13 @@ namespace rl_tools {
                                 ? (2 + (PARAMETERS::ACTOR_OBSERVE_CHARGING_STATION_POSITION ? 2 : 0) + 1)
                                 : 0;
                         // Other agents: rel_pos(2), vel(2), battery(1), dead(1), is_charging(1), is_detecting(1)
-                        static constexpr TI PER_OTHER_AGENT_DIM = 8;
+                        static constexpr TI SWARM_FEATURE_DIM = PARAMETERS::RANDOMIZE_SWARM_SIZE ? 2 : 0; // own presence, fleet size / capacity
+                        static constexpr TI PREFIX_DIM = BASE_PER_AGENT_DIM + RELATIVE_EXTRA_DIM + SWARM_FEATURE_DIM;
+                        static constexpr TI PER_OTHER_AGENT_DIM = PARAMETERS::RANDOMIZE_SWARM_SIZE ? 9 : 8; // final feature is presence
                         static constexpr TI OTHER_AGENTS_DIM = (PARAMETERS::N_AGENTS - 1) * PER_OTHER_AGENT_DIM;
                         // One-hot agent index to break symmetry with shared weights
                         static constexpr TI AGENT_ID_DIM = PARAMETERS::N_AGENTS;
-                        static constexpr TI PER_AGENT_DIM = BASE_PER_AGENT_DIM + RELATIVE_EXTRA_DIM + OTHER_AGENTS_DIM + AGENT_ID_DIM;
+                        static constexpr TI PER_AGENT_DIM = PREFIX_DIM + OTHER_AGENTS_DIM + AGENT_ID_DIM;
                         // Shared: in relative mode the flag has moved per-agent (SHARED_DIM=0).
                         // Absolute mode keeps: flag + disaster_pos(2) + charger_pos(2 opt).
                         static constexpr TI SHARED_DIM =
@@ -412,7 +419,7 @@ namespace rl_tools {
                         using PARAMETERS = T_PARAMETERS;
                         using T = typename PARAMETERS::T;
                         using TI = typename PARAMETERS::TI;
-                        static constexpr TI PER_AGENT_DIM = 8; // pos(2), vel(2), is_detecting(1), battery(1), dead(1), is_charging(1)
+                        static constexpr TI PER_AGENT_DIM = PARAMETERS::RANDOMIZE_SWARM_SIZE ? 9 : 8; // presence appended to pos(2), vel(2), is_detecting(1), battery(1), dead(1), is_charging(1)
                         static constexpr TI SHARED_DIM = PARAMETERS::PRIVILEGED_OBSERVE_REMAINING_NORMALIZED ? 9 : 8; // disaster_active, disaster_detected_global, disaster_pos(2), disaster_vel(2), charging_station_pos(2) [+ remaining_normalized(1) if flag set]
                         static constexpr TI DIM = PARAMETERS::N_AGENTS * PER_AGENT_DIM + SHARED_DIM; // global critic observation
                     };
@@ -482,6 +489,7 @@ namespace rl_tools {
                         using TI = typename SPEC::TI;
                         using PARAMS = typename SPEC::PARAMETERS;
 
+                        TI n_agents = PARAMS::N_AGENTS; // present slots [0, n_agents); deaths do not change this
                         DroneState<T, TI> drone_states[SPEC::PARAMETERS::N_AGENTS];
                         DisasterState<T> disaster;
                         Metrics<T, TI, PARAMS> metrics;
@@ -531,7 +539,10 @@ namespace rl_tools {
                     using Observation = typename SPEC::OBSERVATION;
                     using ObservationPrivileged = typename SPEC::OBSERVATION_PRIVILEGED;
                     using Action = typename SPEC::ACTION;
-                    static constexpr TI N_AGENTS = Parameters::N_AGENTS;
+                    static constexpr TI MAX_AGENTS = Parameters::N_AGENTS;
+                    static constexpr TI N_AGENTS = MAX_AGENTS;
+                    // Zero selects the configured episode randomization; evaluation may override.
+                    TI fixed_n_agents = 0;
                     static constexpr TI PER_AGENT_ACTION_DIM = 2; // acceleration in x and y
                     static constexpr TI ACTION_DIM = N_AGENTS * PER_AGENT_ACTION_DIM;
                     static constexpr TI EPISODE_STEP_LIMIT = Parameters::EPISODE_STEP_LIMIT;

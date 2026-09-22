@@ -54,6 +54,7 @@ namespace rl_tools{
             using NOISE_CONTAINER_SPEC = matrix::Specification<T_BUFFER, typename BUFFER_SPEC::TI, LAYER_SPEC::INTERNAL_BATCH_SIZE, LAYER_SPEC::DIM, BUFFER_SPEC::DYNAMIC_ALLOCATION>;
             using NOISE_CONTAINER_TYPE = Matrix<NOISE_CONTAINER_SPEC>;
             NOISE_CONTAINER_TYPE noise;
+            NOISE_CONTAINER_TYPE action_mask; // allocated only for MASK_ACTIONS configurations
 
             using LOG_PROBABILITIES_CONTAINER_SPEC = matrix::Specification<T_BUFFER, typename LAYER_SPEC::TI, 1, LAYER_SPEC::INTERNAL_BATCH_SIZE, BUFFER_SPEC::DYNAMIC_ALLOCATION>;
             using LOG_PROBABILITIES_CONTAINER_TYPE = Matrix<LOG_PROBABILITIES_CONTAINER_SPEC>;
@@ -63,11 +64,12 @@ namespace rl_tools{
             using D_LOG_ALPHA_CONTAINER_TYPE = Matrix<D_LOG_ALPHA_CONTAINER_SPEC>;
             D_LOG_ALPHA_CONTAINER_TYPE d_log_alpha;
         };
-        template<typename T_TYPE_POLICY, typename T_TI, typename T_PARAMETERS = DefaultParameters<T_TYPE_POLICY>>
+        template<typename T_TYPE_POLICY, typename T_TI, typename T_PARAMETERS = DefaultParameters<T_TYPE_POLICY>, bool T_MASK_ACTIONS = false>
         struct Configuration {
             using TYPE_POLICY = T_TYPE_POLICY;
             using TI = T_TI;
             using PARAMETERS = T_PARAMETERS;
+            static constexpr bool MASK_ACTIONS = T_MASK_ACTIONS;
         };
         template <typename T_CONFIG, typename T_CAPABILITY, typename T_INPUT_SHAPE>
         struct Specification: T_CAPABILITY, T_CONFIG{

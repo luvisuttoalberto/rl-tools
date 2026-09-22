@@ -60,7 +60,7 @@ static constexpr TI ACTION_DIM = ENVIRONMENT::ACTION_DIM;
 
 // Write CSV header
 void write_header(std::ostream& out) {
-    out << "episode,step,reward,terminated,disaster_active,dis_x,dis_y";
+    out << "episode,step,reward,terminated,disaster_active,dis_x,dis_y,n_agents";
     for (TI i = 0; i < N_AGENTS; ++i) {
         out << ",a" << i << "_x"
             << ",a" << i << "_y"
@@ -69,7 +69,8 @@ void write_header(std::ostream& out) {
             << ",a" << i << "_battery"
             << ",a" << i << "_dead"
             << ",a" << i << "_charging"
-            << ",a" << i << "_detecting";
+            << ",a" << i << "_detecting"
+            << ",a" << i << "_present";
     }
     out << "\n";
 }
@@ -80,7 +81,7 @@ void write_step(std::ostream& out, TI episode, TI step, T reward, bool terminate
     out << episode << "," << step << "," << reward << ","
         << (terminated ? 1 : 0) << ","
         << (state.disaster.active ? 1 : 0) << ","
-        << state.disaster.position[0] << "," << state.disaster.position[1];
+        << state.disaster.position[0] << "," << state.disaster.position[1] << "," << state.n_agents;
     for (TI i = 0; i < N_AGENTS; ++i) {
         const auto& d = state.drone_states[i];
         out << "," << d.position[0]
@@ -90,7 +91,7 @@ void write_step(std::ostream& out, TI episode, TI step, T reward, bool terminate
             << "," << d.battery
             << "," << (d.dead ? 1 : 0)
             << "," << (d.is_charging ? 1 : 0)
-            << "," << (d.is_detecting ? 1 : 0);
+            << "," << (d.is_detecting ? 1 : 0) << "," << (i < state.n_agents ? 1 : 0);
     }
     out << "\n";
 }
@@ -113,6 +114,8 @@ int main(int argc, char** argv) {
     app.add_option("-n,--episodes",   n_episodes,      "Number of episodes to run (default: 20)");
     app.add_option("-s,--seed",       seed,            "RNG seed (default: 0)");
     app.add_flag("--stochastic",      stochastic,      "Use stochastic (randomized) episode initialization");
+    TI n_agents = ENVIRONMENT::N_AGENTS;
+    app.add_option("--agents", n_agents, "Number of agents (same checkpoint for every supported size)")->check(CLI::Range(int(ENVIRONMENT::PARAMETERS::MIN_AGENTS), int(ENVIRONMENT::N_AGENTS)));
     CLI11_PARSE(app, argc, argv);
 
     rlt::init(device, rng, seed);
@@ -127,7 +130,7 @@ int main(int argc, char** argv) {
     auto actor_group = rlt::get_group(device, hdf5_file, "actor");
     bool ok = rlt::load(device, actor, actor_group);
     if (!ok) {
-        std::cerr << "Failed to load actor from: " << checkpoint_path << "\n";
+        std::cerr << "Incompatible actor checkpoint (requires variable-swarm v2 with the compiled MAX_AGENTS). File: " << checkpoint_path << "\n";
         return 1;
     }
     std::cerr << "Loaded actor from: " << checkpoint_path << "\n";
@@ -158,6 +161,7 @@ int main(int argc, char** argv) {
     write_header(*out);
 
     ENVIRONMENT env;
+    env.fixed_n_agents = n_agents;
     ENVIRONMENT::Parameters parameters;
     ENVIRONMENT::State state, next_state;
 

@@ -23,7 +23,7 @@ namespace rl_tools::nn_models::mean_embedding {
         std::stringstream body;
         body << ind << "namespace " << name << " {\n" << encoder.body;
         body << ind << "using CONFIG = " << ns << "nn_models::mean_embedding::Configuration<encoder::CONFIG, "
-             << SPEC::PREFIX_DIM << ", " << SPEC::ELEMENT_DIM << ", " << SPEC::N_ELEMENTS << ", " << SPEC::IGNORED_SUFFIX_DIM << ">;\n";
+             << SPEC::PREFIX_DIM << ", " << SPEC::ELEMENT_DIM << ", " << SPEC::N_ELEMENTS << ", " << SPEC::IGNORED_SUFFIX_DIM << ", " << (SPEC::MASKED ? "true" : "false") << ">;\n";
         body << ind << "using TEMPLATE = " << ns << "nn_models::mean_embedding::BindConfiguration<CONFIG>;\n";
         body << ind << "using INPUT_SHAPE = " << ns << "tensor::Shape<" << containers::persist::get_type_string<typename SPEC::TI>();
         write_shape<typename SPEC::INPUT_SHAPE>(body, std::make_index_sequence<length(typename SPEC::INPUT_SHAPE{})>{});

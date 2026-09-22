@@ -181,9 +181,19 @@ struct SmokeParameters: Factory::LOOP_CORE_PARAMETERS {
     };
     static constexpr TI ACTOR_HIDDEN_DIM = 8, CRITIC_HIDDEN_DIM = 8;
     static constexpr TI TEAMMATE_ENCODER_HIDDEN_DIM = 5, TEAMMATE_EMBEDDING_DIM = 4;
-    static constexpr TI STEP_LIMIT = 16, REPLAY_BUFFER_CAP = 32, N_ENVIRONMENTS = 1;
+    static constexpr TI STEP_LIMIT = 64, REPLAY_BUFFER_CAP = 128, N_ENVIRONMENTS = 2;
+    static constexpr TI EPISODE_STEP_LIMIT = 4;
     static constexpr TI N_WARMUP_STEPS = 4, N_WARMUP_STEPS_CRITIC = 4, N_WARMUP_STEPS_ACTOR = 4;
 };
+struct FiveAgentParameters: Factory::ENVIRONMENT::PARAMETERS {
+    static constexpr TI MAX_AGENTS = 5, N_AGENTS = MAX_AGENTS;
+};
+using FiveAgentSpec = rlt::rl::environments::multi_agent::oil_platform::Specification<T, TI, FiveAgentParameters,
+    rlt::rl::environments::multi_agent::oil_platform::Observation<FiveAgentParameters>,
+    rlt::rl::environments::multi_agent::oil_platform::ObservationPrivileged<FiveAgentParameters>>;
+using FiveAgentEnv = rlt::rl::environments::multi_agent::OilPlatform<FiveAgentSpec>;
+using FiveAgentActor = rlt::rl::zoo::oil_platform_v1::multi_agent_sac::ConfigApproximatorsMLPMultiAgent<TP, TI, FiveAgentEnv, SmokeParameters, true>::ACTOR_TYPE;
+
 using SmokeConfig = rlt::rl::algorithms::sac::loop::core::Config<TP, TI, RNG, Factory::ENVIRONMENT, SmokeParameters,
     rlt::rl::zoo::oil_platform_v1::multi_agent_sac::ConfigApproximatorsMLPMultiAgent>;
 
@@ -197,11 +207,35 @@ TEST(MeanEmbeddingSAC, TrainingAndActorCheckpoint) {
     auto& weights = actor.wrapper.content.content.encoder.input_layer.weights.parameters;
     auto& head_weights = actor.wrapper.content.next_module.content.input_layer.weights.parameters;
     T initial = rlt::get(device, weights, 0, 0);
-    T initial_head = rlt::get(device, head_weights, 0, 0);
+    auto head_matrix = rlt::matrix_view(device, head_weights);
+    T initial_head[decltype(head_matrix)::ROWS * decltype(head_matrix)::COLS];
+    for(TI r = 0; r < decltype(head_matrix)::ROWS; ++r) for(TI c = 0; c < decltype(head_matrix)::COLS; ++c)
+        initial_head[r * decltype(head_matrix)::COLS + c] = rlt::get(head_matrix, r, c);
     for(TI step = 0; step < SmokeParameters::STEP_LIMIT; ++step) rlt::step(device, state);
     EXPECT_FALSE(is_nan(device, actor));
     EXPECT_NE(rlt::get(device, weights, 0, 0), initial);
-    EXPECT_NE(rlt::get(device, head_weights, 0, 0), initial_head);
+    T head_change = 0;
+    for(TI r = 0; r < decltype(head_matrix)::ROWS; ++r) for(TI c = 0; c < decltype(head_matrix)::COLS; ++c)
+        head_change += std::abs(rlt::get(head_matrix, r, c) - initial_head[r * decltype(head_matrix)::COLS + c]);
+    EXPECT_GT(head_change, 1e-8);
+    bool sizes[Factory::ENVIRONMENT::N_AGENTS + 1] = {};
+    for(TI e = 0; e < SmokeParameters::N_ENVIRONMENTS; ++e) {
+        auto& replay = rlt::get(state.off_policy_runner.replay_buffers, 0, e);
+        for(TI i = 0; i < SmokeParameters::STEP_LIMIT; ++i) {
+            TI present = 0;
+            using Obs = Factory::ENVIRONMENT::Observation;
+            for(TI a = 0; a < Factory::ENVIRONMENT::N_AGENTS; ++a)
+                present += rlt::get(replay.observations, i, a * Obs::PER_AGENT_DIM + Obs::BASE_PER_AGENT_DIM + Obs::RELATIVE_EXTRA_DIM) > 0;
+            ASSERT_GE(present, 2);
+            ASSERT_LE(present, Factory::ENVIRONMENT::N_AGENTS);
+            sizes[present] = true;
+            for(TI a = present; a < Factory::ENVIRONMENT::N_AGENTS; ++a)
+                for(TI k = 0; k < 2; ++k) EXPECT_EQ(rlt::get(replay.actions, i, a * 2 + k), 0);
+        }
+    }
+    TI different_sizes = 0;
+    for(TI n = 2; n <= Factory::ENVIRONMENT::N_AGENTS; ++n) different_sizes += sizes[n];
+    EXPECT_GE(different_sizes, 3);
     EXPECT_EQ(rlt::get(device, state.actor_critic.actor_optimizer.age, 0), 1 + SmokeParameters::STEP_LIMIT - SmokeParameters::N_WARMUP_STEPS_ACTOR);
     T trained = rlt::get(device, weights, 0, 0);
     rlt::persist::backends::tar::Writer writer;
@@ -226,19 +260,27 @@ TEST(MeanEmbeddingSAC, TrainingAndActorCheckpoint) {
     malloc(device, inference_buffer);
     reader.path[0] = '\0';
     ASSERT_TRUE(rlt::load(device, inference, reader));
+    FiveAgentActor wrong_capacity;
+    reader.path[0] = '\0';
+    EXPECT_FALSE(rlt::load(device, wrong_capacity, reader));
     using Obs = Factory::ENVIRONMENT::Observation;
     rlt::Matrix<rlt::matrix::Specification<T, TI, 1, Obs::DIM>> observations;
     rlt::Matrix<rlt::matrix::Specification<T, TI, 1, Factory::ENVIRONMENT::ACTION_DIM>> actions;
     rlt::malloc(device, observations);
     rlt::malloc(device, actions);
-    for(TI k = 0; k < Obs::DIM; ++k) rlt::set(observations, 0, k, T(k % 11) / 11 - 0.5);
+    Factory::ENVIRONMENT env;
+    env.fixed_n_agents = Factory::ENVIRONMENT::N_AGENTS;
+    Factory::ENVIRONMENT::Parameters parameters;
+    Factory::ENVIRONMENT::State env_state;
+    rlt::initial_state(device, env, parameters, env_state);
+    rlt::observe(device, env, parameters, env_state, Obs{}, observations, state.rng);
     auto obs_tensor = rlt::to_tensor(device, observations);
     auto action_tensor = rlt::to_tensor(device, actions);
     evaluate_step(device, inference, obs_tensor, inference_state, action_tensor, inference_buffer, state.rng, rlt::Mode<rlt::mode::Evaluation<>>{});
     T reference[Factory::ENVIRONMENT::ACTION_DIM];
     for(TI k = 0; k < Factory::ENVIRONMENT::ACTION_DIM; ++k) reference[k] = rlt::get(actions, 0, k);
     for(TI i = 0; i < Factory::ENVIRONMENT::N_AGENTS; ++i) {
-        TI neighbors = i * Obs::PER_AGENT_DIM + Obs::BASE_PER_AGENT_DIM + Obs::RELATIVE_EXTRA_DIM;
+        TI neighbors = i * Obs::PER_AGENT_DIM + Obs::PREFIX_DIM;
         for(TI k = 0; k < Obs::PER_OTHER_AGENT_DIM; ++k) {
             T old = rlt::get(observations, 0, neighbors + k);
             rlt::set(observations, 0, neighbors + k, rlt::get(observations, 0, neighbors + Obs::PER_OTHER_AGENT_DIM + k));
@@ -256,6 +298,17 @@ TEST(MeanEmbeddingSAC, TrainingAndActorCheckpoint) {
         file << "}; constexpr double output[] = {";
         for(TI k = 0; k < Factory::ENVIRONMENT::ACTION_DIM; ++k) file << reference[k] << ",";
         file << "}; }\n";
+        // Also export an observation with padding and a present dead drone.
+        env.fixed_n_agents = 2;
+        rlt::initial_state(device, env, parameters, env_state);
+        env_state.drone_states[0].dead = true;
+        rlt::observe(device, env, parameters, env_state, Obs{}, observations, state.rng);
+        evaluate_step(device, inference, obs_tensor, inference_state, action_tensor, inference_buffer, state.rng, rlt::Mode<rlt::mode::Evaluation<>>{});
+        file << "namespace actor_expected { constexpr double masked_input[] = {";
+        for(TI k = 0; k < Obs::DIM; ++k) file << rlt::get(observations, 0, k) << ",";
+        file << "}; constexpr double masked_output[] = {";
+        for(TI k = 0; k < Factory::ENVIRONMENT::ACTION_DIM; ++k) file << rlt::get(actions, 0, k) << ",";
+        file << "}; }\n";
         ASSERT_TRUE(file.good());
     }
     rlt::free(device, actions);
@@ -263,4 +316,233 @@ TEST(MeanEmbeddingSAC, TrainingAndActorCheckpoint) {
     free(device, inference_buffer);
     free(device, inference);
     rlt::free(device, state);
+}
+
+TEST(VariableSwarm, MaskedMeanGradientsAndEmptySet) {
+    using Config = me::Configuration<Encoder, 2, 3, 3, 0, true>;
+    using Network = me::Module<Config, Capability, rlt::tensor::Shape<TI, 1, 2, 14>>;
+    DEVICE device;
+    RNG rng;
+    rlt::init(device, rng, 23);
+    Network network;
+    Network::Buffer<> buffer;
+    Tensor<14> input, din;
+    Tensor<6> output, dout;
+    malloc(device, network); malloc(device, buffer);
+    rlt::malloc(device, input); rlt::malloc(device, din);
+    rlt::malloc(device, output); rlt::malloc(device, dout);
+    init_weights(device, network, rng);
+    auto in = rlt::matrix_view(device, input);
+    auto out = rlt::matrix_view(device, output);
+    auto grad = rlt::matrix_view(device, din);
+    rlt::set_all(device, input, T(0.2));
+    rlt::set_all(device, dout, T(1));
+    // Row 0 has two present elements; row 1 is empty. Nonzero encoder biases
+    // ensure masking after encoding is necessary (zero padding alone is wrong).
+    rlt::set_all(device, network.encoder.output_layer.biases.parameters, T(0.7));
+    for(TI row = 0; row < 2; ++row) for(TI j = 0; j < 3; ++j)
+        rlt::set(in, row, 2 + j * 4 + 3, row == 0 && j != 1 ? 1 : 0);
+    zero_gradient(device, network);
+    forward(device, network, input, buffer, rng);
+    backward_full(device, network, input, dout, din, buffer);
+    auto loss = [&]() {
+        evaluate(device, network, input, output, buffer, rng);
+        return rlt::sum(device, output);
+    };
+    T reference = loss();
+    for(TI k = 2; k < 6; ++k) EXPECT_EQ(rlt::get(out, 1, k), 0);
+    // Padding contents must not affect either the mean or its gradients.
+    for(TI k = 0; k < 3; ++k) rlt::set(in, 0, 6 + k, 1234);
+    EXPECT_DOUBLE_EQ(loss(), reference);
+    for(TI row = 0; row < 2; ++row) for(TI k = 0; k < 14; ++k) {
+        if(k >= 2 && (k - 2) % 4 == 3) { EXPECT_EQ(rlt::get(grad, row, k), 0); continue; }
+        T old = rlt::get(in, row, k);
+        rlt::set(in, row, k, old + 1e-6); T plus = loss();
+        rlt::set(in, row, k, old - 1e-6); T minus = loss();
+        rlt::set(in, row, k, old);
+        EXPECT_NEAR(rlt::get(grad, row, k), (plus - minus) / 2e-6, 2e-8);
+    }
+    auto weights = rlt::matrix_view(device, network.encoder.input_layer.weights.parameters);
+    auto dw = rlt::matrix_view(device, network.encoder.input_layer.weights.gradient);
+    for(TI r = 0; r < decltype(weights)::ROWS; ++r) for(TI c = 0; c < decltype(weights)::COLS; ++c) {
+        T old = rlt::get(weights, r, c);
+        rlt::set(weights, r, c, old + 1e-6); T plus = loss();
+        rlt::set(weights, r, c, old - 1e-6); T minus = loss();
+        rlt::set(weights, r, c, old);
+        EXPECT_NEAR(rlt::get(dw, r, c), (plus - minus) / 2e-6, 2e-8);
+    }
+    free(device, buffer); free(device, network);
+    rlt::free(device, input); rlt::free(device, din); rlt::free(device, output); rlt::free(device, dout);
+}
+
+struct MaskedSASParameters: rlt::nn::layers::sample_and_squash::DefaultParameters<TP> {
+    static constexpr T TARGET_ENTROPY = -6;
+};
+TEST(VariableSwarm, MaskedSamplingEntropyAndGradients) {
+    using Config = rlt::nn::layers::sample_and_squash::Configuration<TP, TI, MaskedSASParameters, true>;
+    using SAS = rlt::nn::layers::sample_and_squash::Layer<Config, Capability, rlt::tensor::Shape<TI, 1, 4, 12>>;
+    DEVICE device;
+    RNG rng;
+    rlt::init(device, rng, 13);
+    SAS sas;
+    SAS::Buffer<> buffer;
+    rlt::Matrix<rlt::matrix::Specification<T, TI, 4, 12>> input, din;
+    rlt::Matrix<rlt::matrix::Specification<T, TI, 4, 6>> output, dout;
+    rlt::malloc(device, sas); rlt::malloc(device, buffer);
+    rlt::malloc(device, input); rlt::malloc(device, din);
+    rlt::malloc(device, output); rlt::malloc(device, dout);
+    rlt::init_weights(device, sas, rng); rlt::zero_gradient(device, sas);
+    rlt::set_all(device, buffer.noise, T(0.3));
+    rlt::set_all(device, dout, T(0.4));
+    const TI active[4] = {2, 4, 6, 0};
+    for(TI row = 0; row < 4; ++row) for(TI k = 0; k < 6; ++k) {
+        rlt::set(input, row, k, 0.1); rlt::set(input, row, 6 + k, -0.2);
+        rlt::set(buffer.action_mask, row, k, k < active[row] ? 1 : 0);
+    }
+    using Mode = rlt::Mode<rlt::nn::layers::sample_and_squash::mode::ExternalNoise<rlt::mode::Default<>>>;
+    rlt::forward(device, sas, input, buffer, rng, Mode{});
+    rlt::backward_full(device, sas, input, dout, din, buffer, Mode{});
+    for(TI row = 0; row < 4; ++row) {
+        EXPECT_NEAR(rlt::get(buffer.d_log_alpha, 0, row), -rlt::get(sas.log_probabilities, 0, row) + T(active[row]), 1e-12);
+        for(TI k = active[row]; k < 6; ++k) {
+            EXPECT_EQ(rlt::get(sas.output, row, k), 0);
+            EXPECT_EQ(rlt::get(din, row, k), 0);
+            EXPECT_EQ(rlt::get(din, row, k + 6), 0);
+        }
+    }
+    auto loss = [&]() {
+        rlt::evaluate(device, sas, input, output, buffer, rng, Mode{});
+        return rlt::sum(device, buffer.log_probabilities) / T(4) + T(0.4) * rlt::sum(device, output);
+    };
+    for(TI row = 0; row < 4; ++row) for(TI k = 0; k < 12; ++k) {
+        T old = rlt::get(input, row, k);
+        rlt::set(input, row, k, old + 1e-6); T plus = loss();
+        rlt::set(input, row, k, old - 1e-6); T minus = loss();
+        rlt::set(input, row, k, old);
+        // The existing SAS derivative approximates the epsilon in the tanh Jacobian.
+        EXPECT_NEAR(rlt::get(din, row, k), (plus - minus) / 2e-6, 2e-6);
+    }
+    rlt::free(device, sas); rlt::free(device, buffer);
+    rlt::free(device, input); rlt::free(device, din); rlt::free(device, output); rlt::free(device, dout);
+}
+
+TEST(VariableSwarm, ResetsPaddingDynamicsRewardsAndInference) {
+    using Env = Factory::ENVIRONMENT;
+    using Obs = Env::Observation;
+    using Priv = Env::ObservationPrivileged;
+    using Forward = SmokeConfig::NN::ACTOR_TYPE::CHANGE_CAPABILITY<rlt::nn::capability::Forward<>>;
+    using Actor = Forward::CHANGE_BATCH_SIZE<TI, 1>;
+    DEVICE device;
+    RNG rng;
+    rlt::init(device, rng, 29);
+    Env env;
+    Env::Parameters parameters;
+    Env::State state, next;
+    Actor actor;
+    Actor::Buffer<> buffer;
+    Actor::State<> actor_state;
+    malloc(device, actor); malloc(device, buffer); init_weights(device, actor, rng);
+    rlt::Matrix<rlt::matrix::Specification<T, TI, 1, Obs::DIM>> obs;
+    rlt::Matrix<rlt::matrix::Specification<T, TI, 1, Priv::DIM>> priv;
+    rlt::Matrix<rlt::matrix::Specification<T, TI, 1, Env::ACTION_DIM>> action;
+    rlt::malloc(device, obs); rlt::malloc(device, priv); rlt::malloc(device, action);
+    bool seen[Env::N_AGENTS + 1] = {};
+    for(TI i = 0; i < 200; ++i) {
+        rlt::sample_initial_state(device, env, parameters, state, rng);
+        ASSERT_GE(state.n_agents, 2); ASSERT_LE(state.n_agents, Env::N_AGENTS);
+        seen[state.n_agents] = true;
+    }
+    for(TI n = 2; n <= Env::N_AGENTS; ++n) {
+        EXPECT_TRUE(seen[n]);
+        env.fixed_n_agents = n;
+        rlt::sample_initial_state(device, env, parameters, state, rng);
+        ASSERT_EQ(state.n_agents, n);
+        rlt::observe(device, env, parameters, state, Obs{}, obs, rng);
+        rlt::observe(device, env, parameters, state, Priv{}, priv, rng);
+        for(TI a = 0; a < Env::N_AGENTS; ++a) {
+            EXPECT_EQ(rlt::get(priv, 0, a * Priv::PER_AGENT_DIM + 8), a < n ? 1 : 0);
+            EXPECT_EQ(rlt::get(obs, 0, a * Obs::PER_AGENT_DIM + 13), a < n ? 1 : 0);
+            if(a >= n) {
+                for(TI k = 0; k < Obs::PER_AGENT_DIM; ++k) EXPECT_EQ(rlt::get(obs, 0, a * Obs::PER_AGENT_DIM + k), 0);
+                for(TI k = 0; k < Priv::PER_AGENT_DIM; ++k) EXPECT_EQ(rlt::get(priv, 0, a * Priv::PER_AGENT_DIM + k), 0);
+            }
+        }
+        auto ot = rlt::to_tensor(device, obs); auto at = rlt::to_tensor(device, action);
+        evaluate_step(device, actor, ot, actor_state, at, buffer, rng, rlt::Mode<rlt::mode::Evaluation<>>{});
+        for(TI a = n; a < Env::N_AGENTS; ++a) for(TI k = 0; k < 2; ++k) EXPECT_EQ(rlt::get(action, 0, a * 2 + k), 0);
+        // A present dead drone stays in the set, but has no action or entropy.
+        state.drone_states[0].dead = true;
+        rlt::observe(device, env, parameters, state, Obs{}, obs, rng);
+        evaluate_step(device, actor, ot, actor_state, at, buffer, rng, rlt::Mode<rlt::mode::Evaluation<>>{});
+        EXPECT_EQ(rlt::get(action, 0, 0), 0); EXPECT_EQ(rlt::get(action, 0, 1), 0);
+        // Dead agent 0 is the first teammate in agent 1's observation.
+        EXPECT_EQ(rlt::get(obs, 0, Obs::PER_AGENT_DIM + Obs::PREFIX_DIM + 8), 1);
+        EXPECT_EQ(rlt::get(obs, 0, Obs::PER_AGENT_DIM + Obs::PREFIX_DIM + 5), 1);
+        rlt::step(device, env, parameters, state, action, next, rng);
+        T reward = rlt::reward(device, env, parameters, state, action, next, rng);
+        EXPECT_TRUE(std::isfinite(reward)); EXPECT_EQ(next.n_agents, n);
+        EXPECT_NEAR(next.metrics.ongoing_death_penalty, -T(3) / T(n), 1e-12);
+        EXPECT_EQ(next.metrics.death_penalty, 0);
+        for(TI a = n; a < Env::N_AGENTS; ++a) EXPECT_EQ(next.drone_states[a].battery, 0);
+        // Arbitrary padding state and actions cannot affect the physical task or reward.
+        auto dirty = state;
+        for(TI a = n; a < Env::N_AGENTS; ++a) {
+            dirty.drone_states[a] = state.drone_states[1];
+            dirty.drone_states[a].is_charging = true;
+            rlt::set(action, 0, a * 2, 99); rlt::set(action, 0, a * 2 + 1, -99);
+        }
+        auto dirty_next = next;
+        for(TI a = n; a < Env::N_AGENTS; ++a) dirty_next.drone_states[a] = dirty.drone_states[a];
+        EXPECT_DOUBLE_EQ(rlt::reward(device, env, parameters, dirty, action, dirty_next, rng), reward);
+        for(TI a = 0; a < n; ++a) dirty_next.drone_states[a].dead = true;
+        EXPECT_TRUE(rlt::terminated(device, env, parameters, dirty_next, rng));
+        auto serialized = rlt::json(device, env, parameters, state);
+        EXPECT_NE(serialized.find("\"n_agents\": " + std::to_string(n)), std::string::npos);
+    }
+    free(device, actor); free(device, buffer);
+    rlt::free(device, obs); rlt::free(device, priv); rlt::free(device, action);
+}
+
+TEST(VariableSwarm, ThreeAgentRewardAndDynamicsMatchFixedEnvironment) {
+    using VariableEnv = Factory::ENVIRONMENT;
+    using FixedEnv = rlt::rl::zoo::oil_platform_v1::ENVIRONMENT_FACTORY<DEVICE, TP, TI, true>::ENVIRONMENT;
+    DEVICE device;
+    RNG rng_fixed, rng_variable;
+    rlt::init(device, rng_fixed, 123);
+    rlt::init(device, rng_variable, 123);
+    FixedEnv fixed;
+    VariableEnv variable;
+    variable.fixed_n_agents = 3;
+    FixedEnv::Parameters fp;
+    VariableEnv::Parameters vp;
+    FixedEnv::State fs, fn;
+    VariableEnv::State vs, vn;
+    rlt::initial_state(device, fixed, fp, fs);
+    rlt::initial_state(device, variable, vp, vs);
+    rlt::Matrix<rlt::matrix::Specification<T, TI, 1, FixedEnv::ACTION_DIM, false>> fa;
+    rlt::Matrix<rlt::matrix::Specification<T, TI, 1, VariableEnv::ACTION_DIM, false>> va;
+    // Cover ordinary movement, charging, and death penalties at reference size.
+    fs.drone_states[0].battery = vs.drone_states[0].battery = 0.01;
+    fs.drone_states[1].position[0] = vs.drone_states[1].position[0] = 50;
+    fs.drone_states[1].position[1] = vs.drone_states[1].position[1] = 50;
+    fs.drone_states[1].battery = vs.drone_states[1].battery = 20;
+    for(TI step = 0; step < 32; ++step) {
+        rlt::set_all(device, va, T(0));
+        for(TI k = 0; k < FixedEnv::ACTION_DIM; ++k) {
+            const T action = k == 2 || k == 3 ? T(0) : T(0.1) * T(int((step + k) % 5) - 2);
+            rlt::set(fa, 0, k, action); rlt::set(va, 0, k, action);
+        }
+        rlt::step(device, fixed, fp, fs, fa, fn, rng_fixed);
+        rlt::step(device, variable, vp, vs, va, vn, rng_variable);
+        const T fr = rlt::reward(device, fixed, fp, fs, fa, fn, rng_fixed);
+        const T vr = rlt::reward(device, variable, vp, vs, va, vn, rng_variable);
+        EXPECT_DOUBLE_EQ(fr, vr);
+        for(TI a = 0; a < 3; ++a) {
+            EXPECT_DOUBLE_EQ(fn.drone_states[a].position[0], vn.drone_states[a].position[0]);
+            EXPECT_DOUBLE_EQ(fn.drone_states[a].position[1], vn.drone_states[a].position[1]);
+            EXPECT_DOUBLE_EQ(fn.drone_states[a].battery, vn.drone_states[a].battery);
+            EXPECT_EQ(fn.drone_states[a].dead, vn.drone_states[a].dead);
+        }
+        fs = fn; vs = vn;
+    }
 }

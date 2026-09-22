@@ -52,10 +52,41 @@ TEST(MeanEmbeddingExport, CompiledSACWrapperMatchesOriginalActions) {
     auto out = rlt::matrix_view(device, output);
     for(TI k = 0; k < decltype(in)::COLS; ++k) rlt::set(in, 0, k, actor_expected::input[k]);
     rlt::evaluate(device, actor_test_wrapper::module, input, output, buffer, rng);
-    for(TI i = 0; i < 3; ++i) for(TI k = 0; k < 2; ++k)
+    for(TI i = 0; i < decltype(out)::COLS / 4; ++i) for(TI k = 0; k < 2; ++k)
         EXPECT_NEAR(std::tanh(rlt::get(out, 0, i * 4 + k)), actor_expected::output[i * 2 + k], 1e-14);
     rlt::free(device, output);
     rlt::free(device, input);
     rlt::free(device, buffer);
     rlt::free(device, rng);
+}
+
+TEST(MeanEmbeddingExport, MaskedSACActionsMatchOriginal) {
+    DEVICE device;
+    RNG rng;
+    rlt::init(device, rng, 0);
+    using Wrapper = actor_test_wrapper::TYPE;
+    using SAS = actor_test_sas::TYPE;
+    Wrapper::Buffer<> wrapper_buffer;
+    SAS::Buffer<> sas_buffer;
+    rlt::Tensor<rlt::tensor::Specification<double, TI, Wrapper::INPUT_SHAPE>> input;
+    rlt::Tensor<rlt::tensor::Specification<double, TI, Wrapper::OUTPUT_SHAPE>> output;
+    rlt::Matrix<rlt::matrix::Specification<double, TI, 1, SAS::INPUT_DIM>> perm;
+    rlt::Matrix<rlt::matrix::Specification<double, TI, 1, SAS::OUTPUT_DIM>> actions;
+    rlt::malloc(device, wrapper_buffer); rlt::malloc(device, sas_buffer);
+    rlt::malloc(device, input); rlt::malloc(device, output);
+    rlt::malloc(device, perm); rlt::malloc(device, actions);
+    auto in = rlt::matrix_view(device, input);
+    auto out = rlt::matrix_view(device, output);
+    for(TI k = 0; k < decltype(in)::COLS; ++k) rlt::set(in, 0, k, actor_expected::masked_input[k]);
+    rlt::evaluate(device, actor_test_wrapper::module, input, output, wrapper_buffer, rng);
+    for(TI a = 0; a < SAS::OUTPUT_DIM / 2; ++a) for(TI k = 0; k < 2; ++k) {
+        rlt::set(perm, 0, a * 2 + k, rlt::get(out, 0, a * 4 + k));
+        rlt::set(perm, 0, SAS::OUTPUT_DIM + a * 2 + k, rlt::get(out, 0, a * 4 + 2 + k));
+    }
+    actor_test::set_action_mask(in, sas_buffer);
+    rlt::evaluate(device, actor_test_sas::module, perm, actions, sas_buffer, rng, rlt::Mode<rlt::mode::Evaluation<>>{});
+    for(TI k = 0; k < SAS::OUTPUT_DIM; ++k) EXPECT_NEAR(rlt::get(actions, 0, k), actor_expected::masked_output[k], 1e-14);
+    rlt::free(device, wrapper_buffer); rlt::free(device, sas_buffer);
+    rlt::free(device, input); rlt::free(device, output);
+    rlt::free(device, perm); rlt::free(device, actions);
 }

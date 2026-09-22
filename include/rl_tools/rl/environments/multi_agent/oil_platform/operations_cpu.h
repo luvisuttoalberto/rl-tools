@@ -31,6 +31,8 @@ namespace rl_tools {
                      const typename rl::environments::multi_agent::OilPlatform<SPEC>::Parameters& parameters) {
         std::string result = "{";
         result += "\"N_AGENTS\":" + std::to_string(SPEC::PARAMETERS::N_AGENTS) + ",";
+        result += "\"MAX_AGENTS\":" + std::to_string(SPEC::PARAMETERS::N_AGENTS) + ",";
+        result += "\"MIN_AGENTS\":" + std::to_string(SPEC::PARAMETERS::MIN_AGENTS) + ",";
         result += "\"GRID_SIZE_X\":" + std::to_string(SPEC::PARAMETERS::GRID_SIZE_X) + ",";
         result += "\"GRID_SIZE_Y\":" + std::to_string(SPEC::PARAMETERS::GRID_SIZE_Y) + ",";
         result += "\"PLATFORM_HALF_SIZE\":" + std::to_string(SPEC::PARAMETERS::PLATFORM_HALF_SIZE) + ",";
@@ -54,7 +56,7 @@ namespace rl_tools {
 
         // Create drone states JSON
         std::string drone_states = "[";
-        for (TI agent_i = 0; agent_i < SPEC::PARAMETERS::N_AGENTS; agent_i++) {
+        for (TI agent_i = 0; agent_i < state.n_agents; agent_i++) {
             if (agent_i > 0) {
                 drone_states += ",";
             }
@@ -86,6 +88,7 @@ namespace rl_tools {
         disaster += "}";
         // Assemble final JSON
         std::string result = "{";
+        result += "\"n_agents\": " + std::to_string(state.n_agents) + ",";
         result += "\"drone_states\": " + drone_states + ",";
         result += "\"disaster\": " + disaster + ",";
         result += "\"last_detected_disaster_position\": [" + std::to_string(state.last_detected_disaster_position[0]) + "," + std::to_string(state.last_detected_disaster_position[1]) + "],";

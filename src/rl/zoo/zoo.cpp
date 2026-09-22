@@ -376,7 +376,7 @@ int zoo(int initial_seed, int num_seeds, std::string extrack_base_path, std::str
     static_assert(sizeof(LOOP_STATE) < 100000000);
 //    rlt::utils::assert_exit(device, num_seeds > 0, "Number of seeds must be greater than 0.");
     for(TI seed = initial_seed; seed < (TI)num_seeds; seed++){
-        LOOP_STATE ts, ts_loaded;
+        LOOP_STATE ts;
         ts.extrack_config.name = "zoo";
         if(extrack_base_path != ""){
             ts.extrack_config.base_path = extrack_base_path;
@@ -392,7 +392,6 @@ int zoo(int initial_seed, int num_seeds, std::string extrack_base_path, std::str
         rlt::malloc(device);
         rlt::init(device);
         rlt::malloc(device, ts);
-        rlt::malloc(device, ts_loaded);
         rlt::init(device, ts, seed);
 #ifdef RL_TOOLS_ENABLE_TENSORBOARD
         rlt::add_hparams(device, device.logger, {{"dummy", 1}}, {});
@@ -582,7 +581,6 @@ int zoo(int initial_seed, int num_seeds, std::string extrack_base_path, std::str
         rlt::free(device, device.logger);
 #endif
         rlt::free(device, ts);
-        rlt::free(device, ts_loaded);
         rlt::free(device);
     }
     return 0;

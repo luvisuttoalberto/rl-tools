@@ -31,7 +31,8 @@ namespace rl_tools::rl::zoo::oil_platform_v1::multi_agent_sac {
         T_TI T_SEQUENCE_LENGTH,
         T_TI T_OBS_DIM,
         T_TI T_ACTION_DIM,
-        bool  T_DYNAMIC_ALLOCATION
+        bool  T_DYNAMIC_ALLOCATION,
+        typename T_OBSERVATION
     >
     struct ActorSpec {
         using TYPE_POLICY = T_TYPE_POLICY;
@@ -39,6 +40,7 @@ namespace rl_tools::rl::zoo::oil_platform_v1::multi_agent_sac {
         using WRAPPER_CONFIG = T_WRAPPER_CONFIG;
         using SAS_CONFIG     = T_SAS_CONFIG;
         using CAPABILITY     = T_CAPABILITY;
+        using OBSERVATION = T_OBSERVATION;
         static constexpr TI N_AGENTS              = T_N_AGENTS;
         static constexpr TI PER_AGENT_ACTION_DIM  = T_PER_AGENT_ACTION_DIM;
         static constexpr TI BATCH_SIZE            = T_BATCH_SIZE;
@@ -60,19 +62,19 @@ namespace rl_tools::rl::zoo::oil_platform_v1::multi_agent_sac {
         using RebindBatchSize = ActorSpec<
             TYPE_POLICY, TI, WRAPPER_CONFIG, SAS_CONFIG, CAPABILITY,
             N_AGENTS, PER_AGENT_ACTION_DIM, (TI)NEW_BS, SEQUENCE_LENGTH,
-            OBS_DIM, ACTION_DIM, DYNAMIC_ALLOCATION>;
+            OBS_DIM, ACTION_DIM, DYNAMIC_ALLOCATION, OBSERVATION>;
 
         template<typename NEW_TI, NEW_TI NEW_SL>
         using RebindSeqLen = ActorSpec<
             TYPE_POLICY, TI, WRAPPER_CONFIG, SAS_CONFIG, CAPABILITY,
             N_AGENTS, PER_AGENT_ACTION_DIM, BATCH_SIZE, (TI)NEW_SL,
-            OBS_DIM, ACTION_DIM, DYNAMIC_ALLOCATION>;
+            OBS_DIM, ACTION_DIM, DYNAMIC_ALLOCATION, OBSERVATION>;
 
         template<typename NEW_CAPABILITY>
         using RebindCapability = ActorSpec<
             TYPE_POLICY, TI, WRAPPER_CONFIG, SAS_CONFIG, NEW_CAPABILITY,
             N_AGENTS, PER_AGENT_ACTION_DIM, BATCH_SIZE, SEQUENCE_LENGTH,
-            OBS_DIM, ACTION_DIM, DYNAMIC_ALLOCATION>;
+            OBS_DIM, ACTION_DIM, DYNAMIC_ALLOCATION, OBSERVATION>;
     };
 
     // -----------------------------------------------------------------------
@@ -261,6 +263,29 @@ namespace rl_tools::rl::zoo::oil_platform_v1::multi_agent_sac {
     template<typename SPEC, bool DA>
     const auto& get_last_buffer(const ActorBuffer<SPEC, DA>& b) { return b.sas_buffer; }
 
+    template<typename SPEC>
+    std::string policy_group_name() {
+        // Capacity is part of the schema: count features are normalized by it.
+        // Keep this short because TAR paths include all nested parameter groups.
+        return SPEC::SAS_CONFIG::MASK_ACTIONS ? "swarm2x" + std::to_string(SPEC::N_AGENTS) : "policy";
+    }
+
+    template<typename DEVICE, typename SPEC, typename INPUT, typename BUFFER>
+    void prepare_action_mask(DEVICE& device, const INPUT& input, BUFFER& buffer) {
+        if constexpr (SPEC::SAS_CONFIG::MASK_ACTIONS) {
+            using OBS = typename SPEC::OBSERVATION;
+            auto in = rlt::matrix_view(device, input);
+            for(typename SPEC::TI row = 0; row < decltype(in)::ROWS; ++row)
+                for(typename SPEC::TI a = 0; a < SPEC::N_AGENTS; ++a) {
+                    const auto base = a * OBS::PER_AGENT_DIM;
+                    const bool actionable = rlt::get(in, row, base + OBS::BASE_PER_AGENT_DIM + OBS::RELATIVE_EXTRA_DIM) > 0
+                                          && rlt::get(in, row, base + 6) < 0;
+                    for(typename SPEC::TI k = 0; k < SPEC::PER_AGENT_ACTION_DIM; ++k)
+                        rlt::set(buffer.sas_buffer.action_mask, row, a * SPEC::PER_AGENT_ACTION_DIM + k, actionable ? 1 : 0);
+                }
+        }
+    }
+
     // -----------------------------------------------------------------------
     // forward  (gradient mode — stores intermediate state for backward)
     // -----------------------------------------------------------------------
@@ -276,6 +301,7 @@ namespace rl_tools::rl::zoo::oil_platform_v1::multi_agent_sac {
         auto wrapper_out_m = rlt::matrix_view(device, wrapper_out_t);
         // 3. Permute to [all_means | all_log_stds] layout
         apply_permutation<DEVICE, SPEC>(device, wrapper_out_m, buffer.perm_buf);
+        prepare_action_mask<DEVICE, SPEC>(device, input, buffer);
         // 4. SAS forward (stores output in sas.output, log_probs in buffer.sas_buffer)
         rlt::forward(device, actor.sas, buffer.perm_buf, buffer.sas_buffer, rng, mode);
         // 5. Copy sas.output → output tensor
@@ -295,6 +321,7 @@ namespace rl_tools::rl::zoo::oil_platform_v1::multi_agent_sac {
         rlt::evaluate(device, actor.wrapper, input, buffer.d_wrapper_output, buffer.wrapper_buffer, rng, mode);
         auto wrapper_out_m = rlt::matrix_view(device, buffer.d_wrapper_output);
         apply_permutation<DEVICE, SPEC>(device, wrapper_out_m, buffer.perm_buf);
+        prepare_action_mask<DEVICE, SPEC>(device, input, buffer);
         auto out_m = rlt::matrix_view(device, output);
         rlt::evaluate(device, actor.sas, buffer.perm_buf, out_m, buffer.sas_buffer, rng, mode);
     }
@@ -312,6 +339,7 @@ namespace rl_tools::rl::zoo::oil_platform_v1::multi_agent_sac {
         rlt::evaluate_step(device, actor.wrapper, input, wrapper_state, wrapper_out_step, buffer.wrapper_buffer, rng, mode);
         auto wrapper_out_m = rlt::matrix_view(device, wrapper_out_step);
         apply_permutation<DEVICE, SPEC>(device, wrapper_out_m, buffer.perm_buf);
+        prepare_action_mask<DEVICE, SPEC>(device, input, buffer);
         auto out_m = rlt::matrix_view(device, output);
         rlt::evaluate(device, actor.sas, buffer.perm_buf, out_m, buffer.sas_buffer, rng, mode);
     }
@@ -388,8 +416,7 @@ namespace rl_tools::rl::zoo::oil_platform_v1::multi_agent_sac {
         template<typename CAPABILITY>
         struct Actor {
             // Shared teammate encoder -> mean pooling -> shared policy MLP.
-            // Keep the raw observation layout, but discard the one-hot ID.
-            // All teammates, including dead drones, remain in the mean.
+            // Ignore padding and IDs. Present dead drones remain in the teammate mean.
             static_assert(ENVIRONMENT::Parameters::OBSERVE_RELATIVE_POSITIONS,
                           "The SAC mean-embedding actor requires per-agent relative task features");
             using ENCODER_CONFIG = rlt::nn_models::mlp::Configuration<
@@ -399,9 +426,9 @@ namespace rl_tools::rl::zoo::oil_platform_v1::multi_agent_sac {
                 typename PARAMETERS::INITIALIZER>;
             using EMBEDDING_CONFIG = rlt::nn_models::mean_embedding::Configuration<
                 ENCODER_CONFIG,
-                ENVIRONMENT::Observation::BASE_PER_AGENT_DIM + ENVIRONMENT::Observation::RELATIVE_EXTRA_DIM,
-                ENVIRONMENT::Observation::PER_OTHER_AGENT_DIM, N_AGENTS - 1,
-                ENVIRONMENT::Observation::AGENT_ID_DIM>;
+                ENVIRONMENT::Observation::PREFIX_DIM,
+                8, N_AGENTS - 1,
+                ENVIRONMENT::Observation::AGENT_ID_DIM, ENVIRONMENT::Parameters::RANDOMIZE_SWARM_SIZE>;
             using EMBEDDING_BOUND = rlt::nn_models::mean_embedding::BindConfiguration<EMBEDDING_CONFIG>;
             using INNER_MLP_CONFIG = rlt::nn_models::mlp::Configuration<
                 TYPE_POLICY, TI,
@@ -431,7 +458,7 @@ namespace rl_tools::rl::zoo::oil_platform_v1::multi_agent_sac {
                 static constexpr T   TARGET_ENTROPY           = SAC_PARAMETERS::TARGET_ENTROPY;
             };
             using SAS_CONFIG = rlt::nn::layers::sample_and_squash::Configuration<
-                TYPE_POLICY, TI, SAS_PARAMETERS_STRUCT>;
+                TYPE_POLICY, TI, SAS_PARAMETERS_STRUCT, ENVIRONMENT::Parameters::RANDOMIZE_SWARM_SIZE>;
 
             using ACTOR_SPEC = ActorSpec<
                 TYPE_POLICY, TI,
@@ -441,7 +468,7 @@ namespace rl_tools::rl::zoo::oil_platform_v1::multi_agent_sac {
                 (TI)SAC_PARAMETERS::ACTOR_BATCH_SIZE,
                 (TI)SAC_PARAMETERS::SEQUENCE_LENGTH,
                 OBS_DIM, ACTION_DIM,
-                DYNAMIC_ALLOCATION
+                DYNAMIC_ALLOCATION, typename ENVIRONMENT::Observation
             >;
             using MODEL = ActorGradient<ACTOR_SPEC>;
         };
@@ -506,7 +533,7 @@ namespace rl_tools {
     {
         // A new, shallow schema also keeps Adam tensor paths within TAR's
         // filename limit. Old concatenation checkpoints are incompatible.
-        auto policy_group = create_group(device, group, "policy");
+        auto policy_group = create_group(device, group, rl::zoo::oil_platform_v1::multi_agent_sac::policy_group_name<SPEC>().c_str());
         save(device, actor.wrapper.content, policy_group);
         auto sas_group = create_group(device, group, "sas");
         save(device, actor.sas, sas_group);
@@ -517,8 +544,9 @@ namespace rl_tools {
               rl::zoo::oil_platform_v1::multi_agent_sac::ActorGradient<SPEC>& actor,
               GROUP& group)
     {
-        if(!group_exists(device, group, "policy")) { return false; }
-        auto policy_group = get_group(device, group, "policy");
+        const auto policy_name = rl::zoo::oil_platform_v1::multi_agent_sac::policy_group_name<SPEC>();
+        if(!group_exists(device, group, policy_name.c_str())) { return false; }
+        auto policy_group = get_group(device, group, policy_name.c_str());
         bool ok = load(device, actor.wrapper.content, policy_group);
         auto sas_group = get_group(device, group, "sas");
         ok &= load(device, actor.sas, sas_group);
@@ -537,6 +565,22 @@ namespace rl_tools {
         code += save_code(device, actor.wrapper, name + "_wrapper", const_declaration, indent);
         code += "\n";
         code += save_code(device, actor.sas,     name + "_sas",     const_declaration, indent);
+        // The export consists of wrapper + sampling layer. Supply the runtime
+        // mask adapter as well so deployment cannot mistake padded actions for
+        // real actions. Input is the matrix view of the actor observation.
+        if constexpr(SPEC::SAS_CONFIG::MASK_ACTIONS) {
+            using OBS = typename SPEC::OBSERVATION;
+            code += "\nnamespace " + name + " {\n";
+            code += "template<typename INPUT, typename BUFFER> void set_action_mask(const INPUT& input, BUFFER& buffer) {\n";
+            code += "    namespace rlt = RL_TOOLS_NAMESPACE_WRAPPER ::rl_tools;\n";
+            code += "    for(unsigned long row = 0; row < INPUT::ROWS; ++row)\n";
+            code += "        for(unsigned long a = 0; a < " + std::to_string(SPEC::N_AGENTS) + "; ++a) {\n";
+            code += "            const auto base = a * " + std::to_string(OBS::PER_AGENT_DIM) + ";\n";
+            code += "            const bool active = rlt::get(input, row, base + " + std::to_string(OBS::BASE_PER_AGENT_DIM + OBS::RELATIVE_EXTRA_DIM) + ") > 0 && rlt::get(input, row, base + 6) < 0;\n";
+            code += "            for(unsigned long k = 0; k < " + std::to_string(SPEC::PER_AGENT_ACTION_DIM) + "; ++k)\n";
+            code += "                rlt::set(buffer.action_mask, row, a * " + std::to_string(SPEC::PER_AGENT_ACTION_DIM) + " + k, active ? 1 : 0);\n";
+            code += "        }\n}\n}\n";
+        }
         return code;
     }
 }
