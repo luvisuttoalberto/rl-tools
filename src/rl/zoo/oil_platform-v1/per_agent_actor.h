@@ -8,6 +8,9 @@
 #include <rl_tools/nn_models/sequential/model.h>
 #include <rl_tools/nn_models/sequential/operations_generic.h>
 #include <rl_tools/nn/optimizers/adam/adam.h>
+#include <rl_tools/nn_models/mean_embedding/operations_generic.h>
+#include <rl_tools/nn_models/mean_embedding/persist.h>
+#include <rl_tools/nn_models/mean_embedding/persist_code.h>
 
 RL_TOOLS_NAMESPACE_WRAPPER_START
 namespace rl_tools::rl::zoo::oil_platform_v1::multi_agent_sac {
@@ -338,8 +341,9 @@ namespace rl_tools::rl::zoo::oil_platform_v1::multi_agent_sac {
     // -----------------------------------------------------------------------
     template<typename DEVICE, typename SPEC, typename OPT_SPEC>
     void step(DEVICE& device, rlt::nn::optimizers::Adam<OPT_SPEC>& optimizer, ActorGradient<SPEC>& actor) {
+        // One optimizer step for all actor weights. The temperature uses its
+        // separate alpha_optimizer; stepping sas here advanced Adam twice.
         rlt::step(device, optimizer, actor.wrapper);
-        rlt::step(device, optimizer, actor.sas);
     }
     template<typename DEVICE, typename SPEC, typename OPT_SPEC>
     void _reset_optimizer_state(DEVICE& device, ActorGradient<SPEC>& actor, rlt::nn::optimizers::Adam<OPT_SPEC>& optimizer) {
@@ -361,8 +365,8 @@ namespace rl_tools::rl::zoo::oil_platform_v1::multi_agent_sac {
         rlt::copy(sd, td, src.sas, tgt.sas);
     }
     template<typename DEVICE, typename SPEC>
-    bool is_nan(DEVICE& device, const ActorGradient<SPEC>& actor) {
-        return rlt::is_nan(device, actor.wrapper);
+    bool is_nan(DEVICE& device, ActorGradient<SPEC>& actor) {
+        return rlt::is_nan(device, actor.wrapper.content);
     }
 
     // -----------------------------------------------------------------------
@@ -383,7 +387,22 @@ namespace rl_tools::rl::zoo::oil_platform_v1::multi_agent_sac {
 
         template<typename CAPABILITY>
         struct Actor {
-            // Inner MLP: PER_AGENT_OBS_DIM → 2*PER_AGENT_ACTION_DIM (means + log_stds per agent)
+            // Shared teammate encoder -> mean pooling -> shared policy MLP.
+            // Keep the raw observation layout, but discard the one-hot ID.
+            // All teammates, including dead drones, remain in the mean.
+            static_assert(ENVIRONMENT::Parameters::OBSERVE_RELATIVE_POSITIONS,
+                          "The SAC mean-embedding actor requires per-agent relative task features");
+            using ENCODER_CONFIG = rlt::nn_models::mlp::Configuration<
+                TYPE_POLICY, TI, PARAMETERS::TEAMMATE_EMBEDDING_DIM,
+                PARAMETERS::TEAMMATE_ENCODER_NUM_LAYERS, PARAMETERS::TEAMMATE_ENCODER_HIDDEN_DIM,
+                PARAMETERS::ACTOR_ACTIVATION_FUNCTION, rlt::nn::activation_functions::IDENTITY,
+                typename PARAMETERS::INITIALIZER>;
+            using EMBEDDING_CONFIG = rlt::nn_models::mean_embedding::Configuration<
+                ENCODER_CONFIG,
+                ENVIRONMENT::Observation::BASE_PER_AGENT_DIM + ENVIRONMENT::Observation::RELATIVE_EXTRA_DIM,
+                ENVIRONMENT::Observation::PER_OTHER_AGENT_DIM, N_AGENTS - 1,
+                ENVIRONMENT::Observation::AGENT_ID_DIM>;
+            using EMBEDDING_BOUND = rlt::nn_models::mean_embedding::BindConfiguration<EMBEDDING_CONFIG>;
             using INNER_MLP_CONFIG = rlt::nn_models::mlp::Configuration<
                 TYPE_POLICY, TI,
                 2 * PER_AGENT_ACTION_DIM,
@@ -396,7 +415,7 @@ namespace rl_tools::rl::zoo::oil_platform_v1::multi_agent_sac {
             using INNER_MLP_BOUND = rlt::nn_models::mlp::BindConfiguration<INNER_MLP_CONFIG>;
             template<typename T_CONTENT, typename T_NEXT = rlt::nn_models::sequential::OutputModule>
             using SeqMod = rlt::nn_models::sequential::Module<T_CONTENT, T_NEXT>;
-            using INNER_MODULE_CHAIN = SeqMod<INNER_MLP_BOUND>;
+            using INNER_MODULE_CHAIN = SeqMod<EMBEDDING_BOUND, SeqMod<INNER_MLP_BOUND>>;
 
             using WRAPPER_CONFIG = rlt::nn_models::multi_agent_wrapper::Configuration<
                 TYPE_POLICY, TI, N_AGENTS, INNER_MODULE_CHAIN>;
@@ -485,8 +504,10 @@ namespace rl_tools {
               rl::zoo::oil_platform_v1::multi_agent_sac::ActorGradient<SPEC>& actor,
               GROUP& group)
     {
-        auto wrapper_group = create_group(device, group, "wrapper");
-        save(device, actor.wrapper, wrapper_group);
+        // A new, shallow schema also keeps Adam tensor paths within TAR's
+        // filename limit. Old concatenation checkpoints are incompatible.
+        auto policy_group = create_group(device, group, "policy");
+        save(device, actor.wrapper.content, policy_group);
         auto sas_group = create_group(device, group, "sas");
         save(device, actor.sas, sas_group);
     }
@@ -496,8 +517,9 @@ namespace rl_tools {
               rl::zoo::oil_platform_v1::multi_agent_sac::ActorGradient<SPEC>& actor,
               GROUP& group)
     {
-        auto wrapper_group = get_group(device, group, "wrapper");
-        bool ok = load(device, actor.wrapper, wrapper_group);
+        if(!group_exists(device, group, "policy")) { return false; }
+        auto policy_group = get_group(device, group, "policy");
+        bool ok = load(device, actor.wrapper.content, policy_group);
         auto sas_group = get_group(device, group, "sas");
         ok &= load(device, actor.sas, sas_group);
         return ok;

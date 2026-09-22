@@ -29,6 +29,9 @@ namespace rl_tools::rl::zoo::oil_platform_v1::sac {
             static constexpr TI REPLAY_BUFFER_CAP = 1000000;
             static constexpr TI ACTOR_NUM_LAYERS = 3;
             static constexpr TI ACTOR_HIDDEN_DIM = 128;
+            static constexpr TI TEAMMATE_ENCODER_NUM_LAYERS = 2;
+            static constexpr TI TEAMMATE_ENCODER_HIDDEN_DIM = 32;
+            static constexpr TI TEAMMATE_EMBEDDING_DIM = 32;
             static constexpr auto ACTOR_ACTIVATION_FUNCTION = rlt::nn::activation_functions::ActivationFunction::RELU;
             static constexpr TI CRITIC_NUM_LAYERS = 3;
             static constexpr TI CRITIC_HIDDEN_DIM = 256;

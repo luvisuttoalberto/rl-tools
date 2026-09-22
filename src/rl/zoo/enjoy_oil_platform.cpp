@@ -51,7 +51,8 @@ using TYPE_POLICY      = rlt::numeric_types::Policy<float, PARAMETER_POLICY>;
 using FACTORY          = rlt::rl::zoo::oil_platform_v1::sac::FACTORY<DEVICE, TYPE_POLICY, TI, RNG>;
 using LOOP_CORE_CONFIG = typename FACTORY::LOOP_CORE_CONFIG;
 using ENVIRONMENT      = typename FACTORY::ENVIRONMENT;
-using ACTOR            = typename LOOP_CORE_CONFIG::NN::ACTOR_TYPE::template CHANGE_CAPABILITY<rlt::nn::capability::Forward<>>;
+using ACTOR_FORWARD    = typename LOOP_CORE_CONFIG::NN::ACTOR_TYPE::template CHANGE_CAPABILITY<rlt::nn::capability::Forward<>>;
+using ACTOR            = typename ACTOR_FORWARD::template CHANGE_BATCH_SIZE<TI, 1>;
 
 static constexpr TI N_AGENTS   = ENVIRONMENT::N_AGENTS;
 static constexpr TI OBS_DIM    = ENVIRONMENT::Observation::DIM;
