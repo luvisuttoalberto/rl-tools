@@ -397,7 +397,7 @@ namespace rl_tools {
                                 ? (2 + (PARAMETERS::ACTOR_OBSERVE_CHARGING_STATION_POSITION ? 2 : 0) + 1)
                                 : 0;
                         // Other agents: rel_pos(2), vel(2), battery(1), dead(1), is_charging(1), is_detecting(1)
-                        static constexpr TI SWARM_FEATURE_DIM = PARAMETERS::RANDOMIZE_SWARM_SIZE ? 2 : 0; // own presence, fleet size / capacity
+                        static constexpr TI SWARM_FEATURE_DIM = PARAMETERS::RANDOMIZE_SWARM_SIZE ? 1 : 0; // own presence only; no global count
                         static constexpr TI PREFIX_DIM = BASE_PER_AGENT_DIM + RELATIVE_EXTRA_DIM + SWARM_FEATURE_DIM;
                         static constexpr TI PER_OTHER_AGENT_DIM = PARAMETERS::RANDOMIZE_SWARM_SIZE ? 9 : 8; // final feature is presence
                         static constexpr TI OTHER_AGENTS_DIM = (PARAMETERS::N_AGENTS - 1) * PER_OTHER_AGENT_DIM;

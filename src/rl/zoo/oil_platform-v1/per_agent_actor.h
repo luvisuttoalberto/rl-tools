@@ -265,9 +265,10 @@ namespace rl_tools::rl::zoo::oil_platform_v1::multi_agent_sac {
 
     template<typename SPEC>
     std::string policy_group_name() {
-        // Capacity is part of the schema: count features are normalized by it.
+        // Version 3 removes the global count from the policy input. Retain the
+        // capacity guard until cross-capacity inference loading is supported.
         // Keep this short because TAR paths include all nested parameter groups.
-        return SPEC::SAS_CONFIG::MASK_ACTIONS ? "swarm2x" + std::to_string(SPEC::N_AGENTS) : "policy";
+        return SPEC::SAS_CONFIG::MASK_ACTIONS ? "swarm3x" + std::to_string(SPEC::N_AGENTS) : "policy";
     }
 
     template<typename DEVICE, typename SPEC, typename INPUT, typename BUFFER>

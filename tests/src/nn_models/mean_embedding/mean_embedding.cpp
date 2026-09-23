@@ -260,6 +260,16 @@ TEST(MeanEmbeddingSAC, TrainingAndActorCheckpoint) {
     malloc(device, inference_buffer);
     reader.path[0] = '\0';
     ASSERT_TRUE(rlt::load(device, inference, reader));
+    // Reject the old count-input schema before reading incompatible MLP tensors.
+    rlt::persist::backends::tar::Writer legacy_writer;
+    decltype(group) legacy_group{"", &legacy_writer};
+    auto legacy_policy = rlt::create_group(device, legacy_group, "swarm2x6");
+    rlt::save(device, actor.wrapper.content, legacy_policy);
+    rlt::persist::backends::tar::finalize(device, legacy_writer);
+    decltype(reader) legacy_reader;
+    legacy_reader.data.data = legacy_writer.buffer.data();
+    legacy_reader.data.size = legacy_writer.buffer.size();
+    EXPECT_FALSE(rlt::load(device, inference, legacy_reader));
     FiveAgentActor wrong_capacity;
     reader.path[0] = '\0';
     EXPECT_FALSE(rlt::load(device, wrong_capacity, reader));
@@ -424,6 +434,51 @@ TEST(VariableSwarm, MaskedSamplingEntropyAndGradients) {
     }
     rlt::free(device, sas); rlt::free(device, buffer);
     rlt::free(device, input); rlt::free(device, din); rlt::free(device, output); rlt::free(device, dout);
+}
+
+TEST(VariableSwarm, ReplicatedTeammatesDoNotExposeGlobalCount) {
+    using Env = Factory::ENVIRONMENT;
+    using Obs = Env::Observation;
+    using Forward = SmokeConfig::NN::ACTOR_TYPE::CHANGE_CAPABILITY<rlt::nn::capability::Forward<>>;
+    using Actor = Forward::CHANGE_BATCH_SIZE<TI, 1>;
+    DEVICE device;
+    RNG rng;
+    rlt::init(device, rng, 37);
+    Env env;
+    env.fixed_n_agents = 2;
+    Env::Parameters parameters;
+    Env::State state;
+    rlt::initial_state(device, env, parameters, state);
+    // Repeat the same neighbor features without changing agent 0 or the task.
+    // This is an observation test; coincident neighbors are never stepped.
+    for(TI a = 2; a < Env::N_AGENTS; ++a) state.drone_states[a] = state.drone_states[1];
+    Actor actor;
+    Actor::Buffer<> buffer;
+    Actor::State<> actor_state;
+    malloc(device, actor); malloc(device, buffer); init_weights(device, actor, rng);
+    rlt::Matrix<rlt::matrix::Specification<T, TI, 1, Obs::DIM>> obs;
+    rlt::Matrix<rlt::matrix::Specification<T, TI, 1, Env::ACTION_DIM>> actions;
+    rlt::malloc(device, obs); rlt::malloc(device, actions);
+    T reference_prefix[Obs::PREFIX_DIM];
+    T reference_actions[2];
+    for(TI n = 2; n <= Env::N_AGENTS; ++n) {
+        state.n_agents = n;
+        rlt::set_all(device, obs, std::numeric_limits<T>::quiet_NaN());
+        rlt::observe(device, env, parameters, state, Obs{}, obs, rng);
+        for(TI k = 0; k < Obs::DIM; ++k) EXPECT_TRUE(std::isfinite(rlt::get(obs, 0, k)));
+        for(TI k = 0; k < Obs::PREFIX_DIM; ++k) {
+            if(n == 2) reference_prefix[k] = rlt::get(obs, 0, k);
+            else EXPECT_EQ(rlt::get(obs, 0, k), reference_prefix[k]);
+        }
+        auto ot = rlt::to_tensor(device, obs); auto at = rlt::to_tensor(device, actions);
+        evaluate_step(device, actor, ot, actor_state, at, buffer, rng, rlt::Mode<rlt::mode::Evaluation<>>{});
+        for(TI k = 0; k < 2; ++k) {
+            if(n == 2) reference_actions[k] = rlt::get(actions, 0, k);
+            else EXPECT_NEAR(rlt::get(actions, 0, k), reference_actions[k], 1e-14);
+        }
+    }
+    free(device, actor); free(device, buffer);
+    rlt::free(device, obs); rlt::free(device, actions);
 }
 
 TEST(VariableSwarm, ResetsPaddingDynamicsRewardsAndInference) {

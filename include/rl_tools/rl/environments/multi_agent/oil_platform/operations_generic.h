@@ -1594,7 +1594,6 @@ namespace rl_tools {
             }
             if constexpr (PARAMS::RANDOMIZE_SWARM_SIZE) {
                 set(observation, 0, offset + OBS::BASE_PER_AGENT_DIM + OBS::RELATIVE_EXTRA_DIM, T(1));
-                set(observation, 0, offset + OBS::BASE_PER_AGENT_DIM + OBS::RELATIVE_EXTRA_DIM + 1, T(state.n_agents) / T(PARAMS::N_AGENTS));
             }
 
             // Own state: 8 dims
